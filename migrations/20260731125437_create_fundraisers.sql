@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS fundraisers (
   contact_phone VARCHAR(255) NOT NULL,
   social_url TEXT,
   country VARCHAR(255) NOT NULL,
-  zip_code INTEGER NOT NULL
+  zip_code VARCHAR(20) NOT NULL
 );
 
 -- +goose Down
