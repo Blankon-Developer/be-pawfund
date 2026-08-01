@@ -1,7 +1,6 @@
 -- +goose Up
 CREATE TABLE IF NOT EXISTS fundraisers (
-  id UUID PRIMARY KEY,
-  user_id UUID UNIQUE NOT NULL REFERENCES users(id),
+  id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   image_object_key TEXT,
   contact_name VARCHAR(255) NOT NULL,
