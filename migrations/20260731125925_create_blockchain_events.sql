@@ -2,7 +2,9 @@
 CREATE TYPE blockchain_event_type AS ENUM (
   'campaign_created',
   'donation_created',
-  'withdrawal'
+  'withdrawal',
+  'campaign_cancelled',
+  'refund_claimed'
 );
 
 CREATE TABLE IF NOT EXISTS blockchain_events (
