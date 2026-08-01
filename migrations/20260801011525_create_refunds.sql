@@ -1,0 +1,9 @@
+-- +goose Up
+CREATE TABLE IF NOT EXISTS refunds (
+  id UUID PRIMARY KEY,
+  campaign_id UUID UNIQUE NOT NULL REFERENCES campaigns(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- +goose Down
+DROP TABLE IF EXISTS refunds;
