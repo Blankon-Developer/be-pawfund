@@ -15,18 +15,18 @@ import (
 
 const maxRegisterSupporterBodyBytes = 1 << 20
 
-type SupporterRegistrar interface {
+type SupporterService interface {
 	Register(ctx context.Context, input service.RegisterSupporterInput) (domain.Supporter, error)
 }
 
 type SupporterHandler struct {
-	service    SupporterRegistrar
+	service    SupporterService
 	urlBuilder *storage.PublicURLBuilder
 	logger     *slog.Logger
 }
 
 func NewSupporterHandler(
-	service SupporterRegistrar,
+	service SupporterService,
 	urlBuilder *storage.PublicURLBuilder,
 	logger *slog.Logger,
 ) *SupporterHandler {
