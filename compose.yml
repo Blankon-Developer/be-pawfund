@@ -20,6 +20,29 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  postgres-test:
+    image: postgres:18.4-alpine3.24
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-pawfund_test}
+      POSTGRES_USER: ${POSTGRES_TEST_USER:-pawfund_test}
+      POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD:-pawfund_test}
+    ports:
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-5433}:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    restart: "no"
+
   minio:
     image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     # The community image runs as a non-root user, while a fresh named volume is
