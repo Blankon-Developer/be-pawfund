@@ -17,7 +17,7 @@ STORAGE_PUBLIC_BASE_URL=http://localhost:9000/pawfund
 Start the development dependencies, apply migrations, and run the API:
 
 ```sh
-docker compose up -d postgres minio valkey
+docker compose up -d postgres minio redis
 set -a
 . ./.env
 set +a
