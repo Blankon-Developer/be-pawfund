@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
+	"github.com/Blankon-Developer/be-pawfund/internal/cache"
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
@@ -19,6 +21,8 @@ import (
 
 type Application struct {
 	DB               *sql.DB
+	Cache            *cache.CacheClient
+	AuthHandler      *api.AuthHandler
 	SupporterHandler *api.SupporterHandler
 	Authenticate     func(http.Handler) http.Handler
 }
@@ -29,9 +33,18 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return nil, err
 	}
 
-	fail := func(err error) (*Application, error) {
-		_ = db.Close()
-		return nil, err
+	var cacheClient *cache.CacheClient
+	fail := func(startupErr error) (*Application, error) {
+		var cleanupErrors []error
+		if cacheClient != nil {
+			if err := cacheClient.Close(); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+		}
+		if err := db.Close(); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("app: close database after startup failure: %w", err))
+		}
+		return nil, errors.Join(append([]error{startupErr}, cleanupErrors...)...)
 	}
 
 	jwtManager, err := auth.NewJWTManager(cfg.JWTSecret)
@@ -44,20 +57,51 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return fail(fmt.Errorf("app: initialize public URL builder: %w", err))
 	}
 
+	cacheClient, err = cache.Open(ctx, cache.Config{URL: cfg.CacheURL, KeyPrefix: cfg.CacheKeyPrefix})
+	if err != nil {
+		return fail(fmt.Errorf("app: initialize cache: %w", err))
+	}
+
 	supporterRepository := repository.NewPostgresSupporterRepository(db)
+	authRepository := repository.NewPostgresAuthRepository(db)
+
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
+	authService := service.NewAuthService(
+		cacheClient,
+		authRepository,
+		jwtManager,
+		service.AuthConfig{
+			Domain:         cfg.SIWEDomain,
+			URI:            cfg.SIWEURI,
+			ChainID:        cfg.SIWEChainID,
+			MessageTTL:     cfg.SIWEMessageTTL,
+			AccessTokenTTL: cfg.JWTTTL,
+		},
+	)
+
 	supporterHandler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
+	authHandler := api.NewAuthHandler(authService, urlBuilder, logger)
 
 	return &Application{
 		DB:               db,
+		Cache:            cacheClient,
+		AuthHandler:      authHandler,
 		SupporterHandler: supporterHandler,
 		Authenticate:     appmiddleware.Authenticate(jwtManager, logger),
 	}, nil
 }
 
 func (a *Application) Close() error {
-	if err := a.DB.Close(); err != nil {
-		return fmt.Errorf("app: close database: %w", err)
+	var closeErrors []error
+	if a.Cache != nil {
+		if err := a.Cache.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("app: close cache: %w", err))
+		}
 	}
-	return nil
+	if a.DB != nil {
+		if err := a.DB.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("app: close database: %w", err))
+		}
+	}
+	return errors.Join(closeErrors...)
 }
