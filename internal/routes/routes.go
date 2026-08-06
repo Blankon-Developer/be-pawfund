@@ -28,6 +28,9 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		}
 	})
 
+	router.Post("/v1/auth/message", application.AuthHandler.HandleCreateMessage)
+	router.Post("/v1/auth/verify", application.AuthHandler.HandleVerify)
+
 	router.With(application.Authenticate).Post(
 		"/v1/register/supporter",
 		application.SupporterHandler.HandleRegisterSupporter,
