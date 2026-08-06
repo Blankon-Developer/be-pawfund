@@ -12,6 +12,13 @@ HTTP_ADDR=:8080
 DATABASE_URL=postgres://pawfund:pawfund@localhost:5432/pawfund?sslmode=disable
 JWT_SECRET=replace-this-with-at-least-32-random-bytes
 STORAGE_PUBLIC_BASE_URL=http://localhost:9000/pawfund
+CACHE_URL=redis://localhost:6379/0
+CACHE_KEY_PREFIX=pawfund
+SIWE_DOMAIN=localhost:3000
+SIWE_URI=http://localhost:3000/login
+SIWE_CHAIN_ID=84532
+SIWE_MESSAGE_TTL=5m
+JWT_TTL=24h
 ```
 
 Start the development dependencies, apply migrations, and run the API:
@@ -27,6 +34,57 @@ go run ./cmd/api
 
 `STORAGE_PUBLIC_BASE_URL` only builds public object URLs. Bucket creation,
 uploads, and bucket access policies are managed separately.
+
+## Sign in with Ethereum
+
+SIWE domain and URI must match the frontend origin. The example configuration
+uses Base Sepolia (`84532`). Message and verify responses use the common API
+envelope shown elsewhere in this document.
+
+Create a SIWE message with `POST /v1/auth/message`:
+
+```json
+{
+  "address": "0x1234567890123456789012345678901234567890"
+}
+```
+
+The success data contains the EIP-4361 message that must be signed exactly as
+returned:
+
+```json
+{
+  "message": "localhost:3000 wants you to sign in with your Ethereum account:\n..."
+}
+```
+
+Send that same message and the resulting 65-byte Ethereum signature to
+`POST /v1/auth/verify`:
+
+```json
+{
+  "message": "localhost:3000 wants you to sign in with your Ethereum account:\n...",
+  "signature": "0x..."
+}
+```
+
+A verified wallet receives an access token. Wallets that have not registered a
+profile can use this token for registration; their profile fields are `null`:
+
+```json
+{
+  "accessToken": "eyJ...",
+  "isRegistered": false,
+  "address": "0x1234567890123456789012345678901234567890",
+  "name": null,
+  "role": null,
+  "imageUrl": null
+}
+```
+
+Registered roles are returned as `supporter` or `fundraiser`. A message is
+short-lived and single-use; expired, unknown, invalid, or replayed messages
+are rejected.
 
 ## Register supporter
 
@@ -85,8 +143,8 @@ Validation failures use HTTP `422` and report every invalid field:
 ## Tests
 
 Unit and integration tests use table-driven test cases. Integration tests run
-against the isolated PostgreSQL service in the Compose `test` profile and
-apply the real migrations before executing.
+against isolated PostgreSQL and Redis services in the Compose `test` profile
+and apply the real migrations before executing.
 
 ```sh
 make test
@@ -96,5 +154,7 @@ make test-db-down
 ```
 
 The integration database listens on port `5433` by default and stores its data
-in `tmpfs`, separate from the development database volume. Override
-`TEST_DATABASE_URL` or `POSTGRES_TEST_PORT` when needed.
+in `tmpfs`, separate from the development database volume. The integration
+Redis instance listens on port `6380` with persistence disabled. Override
+`TEST_DATABASE_URL`, `TEST_CACHE_URL`, `POSTGRES_TEST_PORT`, or
+`REDIS_TEST_PORT` when needed.
