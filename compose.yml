@@ -33,10 +33,7 @@ services:
       - /var/lib/postgresql
     healthcheck:
       test:
-        [
-          "CMD-SHELL",
-          'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
-        ]
+        ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 2s
       timeout: 5s
       retries: 15
@@ -83,6 +80,20 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+
+  redis-test:
+    image: redis:8.8.1-alpine3.23
+    profiles: ["test"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_TEST_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    restart: "no"
 
 volumes:
   postgres_data:
