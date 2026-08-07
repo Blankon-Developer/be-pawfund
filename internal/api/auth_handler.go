@@ -22,7 +22,7 @@ type AuthService interface {
 type AuthHandler struct {
 	service    AuthService
 	urlBuilder *storage.PublicURLBuilder
-	logger     *slog.Logger
+	httpx.Responder
 }
 
 func NewAuthHandler(
@@ -30,7 +30,7 @@ func NewAuthHandler(
 	urlBuilder *storage.PublicURLBuilder,
 	logger *slog.Logger,
 ) *AuthHandler {
-	return &AuthHandler{service: service, urlBuilder: urlBuilder, logger: logger}
+	return &AuthHandler{service: service, urlBuilder: urlBuilder, Responder: httpx.NewResponder(logger)}
 }
 
 func (h *AuthHandler) HandleCreateMessage(w http.ResponseWriter, r *http.Request) {
@@ -38,35 +38,33 @@ func (h *AuthHandler) HandleCreateMessage(w http.ResponseWriter, r *http.Request
 
 	var request createAuthMessageRequest
 	if err := httpx.ReadJSON(w, r, &request, maxAuthBodyBytes); err != nil {
-		h.handleReadError(w, err)
+		h.ReadError(w, err, "Request body exceeds the 16 KiB limit.")
 		return
 	}
 	request.Address = strings.TrimSpace(request.Address)
 	if request.Address == "" {
-		h.writeValidationError(w, httpx.FieldErrors{"address": {"address is required!"}})
+		h.ValidationError(w, httpx.FieldErrors{"address": {"address is required!"}})
 		return
 	}
 
 	msg, err := h.service.CreateMessage(r.Context(), request.Address)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidWalletAddress) {
-			h.writeValidationError(w, httpx.FieldErrors{"address": {"address must be a valid Ethereum address!"}})
+			h.ValidationError(w, httpx.FieldErrors{"address": {"address must be a valid Ethereum address!"}})
 			return
 		}
-		h.logger.Error("create auth message", "error", err)
-		h.writeInternalError(w)
+		h.Logger.Error("create auth message", "error", err)
+		h.InternalError(w)
 		return
 	}
 
-	if err := httpx.WriteSuccess(
+	h.Success(
 		w,
 		http.StatusOK,
 		"AUTH_MESSAGE_CREATED",
 		"Authentication message created successfully.",
 		createAuthMessageResponse{Message: msg},
-	); err != nil {
-		h.logger.Error("write create auth message response", "error", err)
-	}
+	)
 }
 
 func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +72,7 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 
 	var request verifyAuthRequest
 	if err := httpx.ReadJSON(w, r, &request, maxAuthBodyBytes); err != nil {
-		h.handleReadError(w, err)
+		h.ReadError(w, err, "Request body exceeds the 16 KiB limit.")
 		return
 	}
 
@@ -87,7 +85,7 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		fieldErrors.Add("signature", "signature is required!")
 	}
 	if len(fieldErrors) != 0 {
-		h.writeValidationError(w, fieldErrors)
+		h.ValidationError(w, fieldErrors)
 		return
 	}
 
@@ -95,11 +93,11 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidMessage):
-			h.writeValidationError(w, httpx.FieldErrors{"message": {"message must be a valid SIWE message!"}})
+			h.ValidationError(w, httpx.FieldErrors{"message": {"message must be a valid SIWE message!"}})
 		case errors.Is(err, service.ErrInvalidSignature):
-			h.writeValidationError(w, httpx.FieldErrors{"signature": {"signature must be a valid 65-byte Ethereum signature!"}})
+			h.ValidationError(w, httpx.FieldErrors{"signature": {"signature must be a valid 65-byte Ethereum signature!"}})
 		case errors.Is(err, service.ErrSIWEVerification):
-			h.writeError(
+			h.Error(
 				w,
 				http.StatusUnauthorized,
 				"SIWE_VERIFICATION_FAILED",
@@ -107,8 +105,8 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 				nil,
 			)
 		default:
-			h.logger.Error("verify auth message", "error", err)
-			h.writeInternalError(w)
+			h.Logger.Error("verify auth message", "error", err)
+			h.InternalError(w)
 		}
 		return
 	}
@@ -124,75 +122,5 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		response.ImageURL = h.urlBuilder.Build(result.Profile.ImageObjectKey)
 	}
 
-	if err := httpx.WriteSuccess(
-		w,
-		http.StatusOK,
-		"AUTH_VERIFIED",
-		"Wallet signature verified successfully.",
-		response,
-	); err != nil {
-		h.logger.Error("write verify auth response", "error", err)
-	}
-}
-
-func (h *AuthHandler) handleReadError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, httpx.ErrUnsupportedMediaType):
-		h.writeError(
-			w,
-			http.StatusUnsupportedMediaType,
-			"UNSUPPORTED_MEDIA_TYPE",
-			"Content-Type must be application/json.",
-			nil,
-		)
-	case errors.Is(err, httpx.ErrBodyTooLarge):
-		h.writeError(
-			w,
-			http.StatusRequestEntityTooLarge,
-			"REQUEST_TOO_LARGE",
-			"Request body exceeds the 16 KiB limit.",
-			nil,
-		)
-	default:
-		h.logger.Debug("invalid auth request", "error", err)
-		h.writeError(
-			w,
-			http.StatusBadRequest,
-			"INVALID_REQUEST",
-			"Request body must contain one valid JSON object.",
-			nil,
-		)
-	}
-}
-
-func (h *AuthHandler) writeValidationError(w http.ResponseWriter, fieldErrors httpx.FieldErrors) {
-	h.writeError(
-		w,
-		http.StatusUnprocessableEntity,
-		"VALIDATION_ERROR",
-		"One or more fields are invalid.",
-		fieldErrors,
-	)
-}
-
-func (h *AuthHandler) writeInternalError(w http.ResponseWriter) {
-	h.writeError(
-		w,
-		http.StatusInternalServerError,
-		"INTERNAL_SERVER_ERROR",
-		"An internal server error occurred.",
-		nil,
-	)
-}
-
-func (h *AuthHandler) writeError(
-	w http.ResponseWriter,
-	status int,
-	code string,
-	message string,
-	fieldErrors httpx.FieldErrors,
-) {
-	if err := httpx.WriteError(w, status, code, message, fieldErrors); err != nil {
-		h.logger.Error("write auth error response", "code", code, "error", err)
-	}
+	h.Success(w, http.StatusOK, "AUTH_VERIFIED", "Wallet signature verified successfully.", response)
 }

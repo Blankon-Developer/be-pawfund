@@ -22,7 +22,7 @@ type SupporterService interface {
 type SupporterHandler struct {
 	service    SupporterService
 	urlBuilder *storage.PublicURLBuilder
-	logger     *slog.Logger
+	httpx.Responder
 }
 
 func NewSupporterHandler(
@@ -33,32 +33,26 @@ func NewSupporterHandler(
 	return &SupporterHandler{
 		service:    service,
 		urlBuilder: urlBuilder,
-		logger:     logger,
+		Responder:  httpx.NewResponder(logger),
 	}
 }
 
 func (h *SupporterHandler) HandleRegisterSupporter(w http.ResponseWriter, r *http.Request) {
 	var request registerSupporterRequest
 	if err := httpx.ReadJSON(w, r, &request, maxRegisterSupporterBodyBytes); err != nil {
-		h.handleReadError(w, err)
+		h.ReadError(w, err, "Request body exceeds the 1 MiB limit.")
 		return
 	}
 
 	request.normalize()
 	if fieldErrors := request.validate(); fieldErrors != nil {
-		h.writeError(
-			w,
-			http.StatusUnprocessableEntity,
-			"VALIDATION_ERROR",
-			"One or more fields are invalid.",
-			fieldErrors,
-		)
+		h.ValidationError(w, fieldErrors)
 		return
 	}
 
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok || principal.WalletAddress == "" {
-		h.writeError(
+		h.Error(
 			w,
 			http.StatusUnauthorized,
 			"INVALID_ACCESS_TOKEN",
@@ -86,51 +80,13 @@ func (h *SupporterHandler) HandleRegisterSupporter(w http.ResponseWriter, r *htt
 		ImageURL:      h.urlBuilder.Build(created.ImageObjectKey),
 		Role:          created.Role,
 	}
-	if err := httpx.WriteSuccess(
-		w,
-		http.StatusCreated,
-		"SUPPORTER_REGISTERED",
-		"Supporter account created successfully.",
-		response,
-	); err != nil {
-		h.logger.Error("write register supporter response", "error", err)
-	}
-}
-
-func (h *SupporterHandler) handleReadError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, httpx.ErrUnsupportedMediaType):
-		h.writeError(
-			w,
-			http.StatusUnsupportedMediaType,
-			"UNSUPPORTED_MEDIA_TYPE",
-			"Content-Type must be application/json.",
-			nil,
-		)
-	case errors.Is(err, httpx.ErrBodyTooLarge):
-		h.writeError(
-			w,
-			http.StatusRequestEntityTooLarge,
-			"REQUEST_TOO_LARGE",
-			"Request body exceeds the 1 MiB limit.",
-			nil,
-		)
-	default:
-		h.logger.Debug("invalid register supporter request", "error", err)
-		h.writeError(
-			w,
-			http.StatusBadRequest,
-			"INVALID_REQUEST",
-			"Request body must contain one valid JSON object.",
-			nil,
-		)
-	}
+	h.Success(w, http.StatusCreated, "SUPPORTER_REGISTERED", "Supporter account created successfully.", response)
 }
 
 func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrEmailAlreadyRegistered):
-		h.writeError(
+		h.Error(
 			w,
 			http.StatusConflict,
 			"EMAIL_ALREADY_REGISTERED",
@@ -138,7 +94,7 @@ func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) 
 			httpx.FieldErrors{"email": {"email is already registered!"}},
 		)
 	case errors.Is(err, service.ErrWalletAlreadyRegistered):
-		h.writeError(
+		h.Error(
 			w,
 			http.StatusConflict,
 			"WALLET_ALREADY_REGISTERED",
@@ -146,25 +102,7 @@ func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) 
 			httpx.FieldErrors{"walletAddress": {"wallet address is already registered!"}},
 		)
 	default:
-		h.logger.Error("register supporter", "error", err)
-		h.writeError(
-			w,
-			http.StatusInternalServerError,
-			"INTERNAL_SERVER_ERROR",
-			"An internal server error occurred.",
-			nil,
-		)
-	}
-}
-
-func (h *SupporterHandler) writeError(
-	w http.ResponseWriter,
-	status int,
-	code string,
-	message string,
-	fieldErrors httpx.FieldErrors,
-) {
-	if err := httpx.WriteError(w, status, code, message, fieldErrors); err != nil {
-		h.logger.Error("write error response", "code", code, "error", err)
+		h.Logger.Error("register supporter", "error", err)
+		h.InternalError(w)
 	}
 }
