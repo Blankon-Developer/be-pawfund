@@ -133,8 +133,8 @@ func (s *AuthService) Verify(
 		return VerifyAuthResult{}, ErrSIWEVerification
 	}
 
-	domain := s.config.Domain
-	if _, err := siweMsg.Verify(signature, &domain, nil, nil); err != nil {
+	siweDomain := s.config.Domain
+	if _, err := siweMsg.Verify(signature, &siweDomain, nil, nil); err != nil {
 		return VerifyAuthResult{}, fmt.Errorf("%w: %v", ErrSIWEVerification, err)
 	}
 

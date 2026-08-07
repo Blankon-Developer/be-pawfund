@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,7 +43,7 @@ func (r *PostgresAuthRepository) FindProfileByWalletAddress(
 		&name,
 		&imageObjectKey,
 	); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return domain.AuthProfile{}, false, nil
 		}
 		return domain.AuthProfile{}, false, fmt.Errorf("repository: find auth profile: %w", err)

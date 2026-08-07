@@ -19,8 +19,8 @@ func TestLoad(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		environment      map[string]string
+		name           string
+		environment    map[string]string
 		wantAddress    string
 		wantError      string
 		wantMessageTTL time.Duration
