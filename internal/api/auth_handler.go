@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
@@ -41,9 +40,10 @@ func (h *AuthHandler) HandleCreateMessage(w http.ResponseWriter, r *http.Request
 		h.ReadError(w, err, "Request body exceeds the 16 KiB limit.")
 		return
 	}
-	request.Address = strings.TrimSpace(request.Address)
-	if request.Address == "" {
-		h.ValidationError(w, httpx.FieldErrors{"address": {"address is required!"}})
+
+	request.normalize()
+	if fieldErrors := request.validate(); fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
 		return
 	}
 
@@ -76,15 +76,8 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fieldErrors := make(httpx.FieldErrors)
-	if strings.TrimSpace(request.Message) == "" {
-		fieldErrors.Add("message", "message is required!")
-	}
-	request.Signature = strings.TrimSpace(request.Signature)
-	if request.Signature == "" {
-		fieldErrors.Add("signature", "signature is required!")
-	}
-	if len(fieldErrors) != 0 {
+	request.normalize()
+	if fieldErrors := request.validate(); fieldErrors != nil {
 		h.ValidationError(w, fieldErrors)
 		return
 	}
