@@ -36,6 +36,10 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		"/v1/register/supporter",
 		application.SupporterHandler.HandleRegisterSupporter,
 	)
+	router.With(application.Authenticate).Post(
+		"/v1/register/fundraiser",
+		application.FundraiserHandler.HandleRegisterFundraiser,
+	)
 
 	return router
 }
