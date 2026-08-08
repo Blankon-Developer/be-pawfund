@@ -20,11 +20,12 @@ import (
 )
 
 type Application struct {
-	DB               *sql.DB
-	Cache            *cache.CacheClient
-	AuthHandler      *api.AuthHandler
-	SupporterHandler *api.SupporterHandler
-	Authenticate     func(http.Handler) http.Handler
+	DB                *sql.DB
+	Cache             *cache.CacheClient
+	AuthHandler       *api.AuthHandler
+	SupporterHandler  *api.SupporterHandler
+	FundraiserHandler *api.FundraiserHandler
+	Authenticate      func(http.Handler) http.Handler
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Application, error) {
@@ -63,9 +64,11 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	}
 
 	supporterRepository := repository.NewPostgresSupporterRepository(db)
+	fundraiserRepository := repository.NewPostgresFundraiserRepository(db)
 	authRepository := repository.NewPostgresAuthRepository(db)
 
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
+	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7)
 	authService := service.NewAuthService(
 		cacheClient,
 		authRepository,
@@ -80,14 +83,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	)
 
 	supporterHandler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
+	fundraiserHandler := api.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
 	authHandler := api.NewAuthHandler(authService, urlBuilder, logger)
 
 	return &Application{
-		DB:               db,
-		Cache:            cacheClient,
-		AuthHandler:      authHandler,
-		SupporterHandler: supporterHandler,
-		Authenticate:     appmiddleware.Authenticate(jwtManager, logger),
+		DB:                db,
+		Cache:             cacheClient,
+		AuthHandler:       authHandler,
+		SupporterHandler:  supporterHandler,
+		FundraiserHandler: fundraiserHandler,
+		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}, nil
 }
 

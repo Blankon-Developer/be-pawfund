@@ -169,6 +169,53 @@ Validation failures use HTTP `422` and report every invalid field:
 }
 ```
 
+## Register fundraiser
+
+`POST /v1/register/fundraiser` uses the same authentication and JSON content
+type requirements as supporter registration. The wallet address is always read
+from the verified access token.
+
+```json
+{
+  "name": "Animal Rescue",
+  "email": "rescue@example.com",
+  "contactPerson": {
+    "name": "Jane Doe",
+    "phone": "+62 812 3456"
+  },
+  "socialUrl": "https://example.com/rescue",
+  "country": "Indonesia",
+  "zipCode": "10110",
+  "imageObjectKey": "profiles/rescue.png"
+}
+```
+
+`imageObjectKey` is optional. All other fields are required, and `socialUrl`
+must be an absolute HTTP or HTTPS URL. A successful request returns:
+
+```json
+{
+  "status": "success",
+  "code": "FUNDRAISER_REGISTERED",
+  "message": "Fundraiser account created successfully.",
+  "data": {
+    "name": "Animal Rescue",
+    "email": "rescue@example.com",
+    "contactPerson": {
+      "name": "Jane Doe",
+      "phone": "+62 812 3456"
+    },
+    "socialUrl": "https://example.com/rescue",
+    "country": "Indonesia",
+    "zipCode": "10110",
+    "imageUrl": "http://localhost:9000/pawfund/profiles/rescue.png",
+    "walletAddress": "0xabc",
+    "role": "fundraiser"
+  },
+  "errors": null
+}
+```
+
 ## Tests
 
 Unit and integration tests use table-driven test cases. Integration tests run
