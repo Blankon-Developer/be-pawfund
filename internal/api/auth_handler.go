@@ -5,7 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/Blankon-Developer/be-pawfund/internal/auth"
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
@@ -16,6 +19,7 @@ const maxAuthBodyBytes = 16 << 10
 type AuthService interface {
 	CreateMessage(ctx context.Context, walletAddress string) (string, error)
 	Verify(ctx context.Context, message, signature string) (service.VerifyAuthResult, error)
+	GetMe(ctx context.Context, walletAddress string) (domain.AuthProfile, error)
 }
 
 type AuthHandler struct {
@@ -116,4 +120,48 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Success(w, http.StatusOK, "AUTH_VERIFIED", "Wallet signature verified successfully.", response)
+}
+
+func (h *AuthHandler) HandleGetMe(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	profile, err := h.service.GetMe(r.Context(), walletAddress)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No profile is registered for the authenticated wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get authenticated profile", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := getMeResponse{
+		Address:  walletAddress,
+		Name:     profile.Name,
+		Role:     profile.Role,
+		ImageURL: h.urlBuilder.Build(profile.ImageObjectKey),
+	}
+	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
 }

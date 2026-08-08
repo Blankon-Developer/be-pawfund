@@ -311,6 +311,81 @@ func TestAuthServiceVerify(t *testing.T) {
 	}
 }
 
+func TestAuthServiceGetMe(t *testing.T) {
+	imageKey := "profiles/cat.png"
+	profile := domain.AuthProfile{
+		Name:           "Cat Lover",
+		Role:           domain.UserRoleSupporter,
+		ImageObjectKey: &imageKey,
+	}
+	repositoryFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name          string
+		walletAddress string
+		profile       domain.AuthProfile
+		registered    bool
+		repositoryErr error
+		wantError     error
+		wantWrapped   error
+		wantAddress   string
+	}{
+		{
+			name:          "returns profile for wallet",
+			walletAddress: " 0x1234567890123456789012345678901234567890 ",
+			profile:       profile,
+			registered:    true,
+			wantAddress:   "0x1234567890123456789012345678901234567890",
+		},
+		{
+			name:          "returns not found for unregistered wallet",
+			walletAddress: "0x2234567890123456789012345678901234567890",
+			wantError:     ErrProfileNotFound,
+			wantAddress:   "0x2234567890123456789012345678901234567890",
+		},
+		{
+			name:          "wraps repository failure",
+			walletAddress: "0x3234567890123456789012345678901234567890",
+			repositoryErr: repositoryFailure,
+			wantWrapped:   repositoryFailure,
+			wantAddress:   "0x3234567890123456789012345678901234567890",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &authProfileRepositoryStub{
+				profile:    test.profile,
+				registered: test.registered,
+				err:        test.repositoryErr,
+			}
+			service := newTestAuthService(&authStoreStub{}, repository, &authTokenGeneratorStub{})
+
+			result, err := service.GetMe(t.Context(), test.walletAddress)
+			switch {
+			case test.wantError != nil:
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("GetMe() error = %v, want %v", err, test.wantError)
+				}
+			case test.wantWrapped != nil:
+				if !errors.Is(err, test.wantWrapped) || !strings.Contains(err.Error(), "find auth profile") {
+					t.Fatalf("GetMe() error = %v, want wrapped %v", err, test.wantWrapped)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("GetMe() unexpected error: %v", err)
+				}
+				if result != profile {
+					t.Errorf("GetMe() result = %#v, want %#v", result, profile)
+				}
+			}
+			if repository.address != test.wantAddress {
+				t.Errorf("repository address = %q, want %q", repository.address, test.wantAddress)
+			}
+		})
+	}
+}
+
 type authVerifyFixture struct {
 	service        *AuthService
 	store          *authStoreStub

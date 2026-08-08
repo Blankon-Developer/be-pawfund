@@ -22,6 +22,7 @@ var (
 	ErrInvalidMessage       = errors.New("invalid SIWE message")
 	ErrInvalidSignature     = errors.New("invalid Ethereum signature")
 	ErrSIWEVerification     = errors.New("SIWE verification failed")
+	ErrProfileNotFound      = errors.New("profile not found")
 )
 
 type AuthConfig struct {
@@ -169,6 +170,21 @@ func (s *AuthService) Verify(
 	}
 
 	return result, nil
+}
+
+func (s *AuthService) GetMe(ctx context.Context, walletAddress string) (domain.AuthProfile, error) {
+	profile, exists, err := s.repository.FindProfileByWalletAddress(
+		ctx,
+		strings.TrimSpace(walletAddress),
+	)
+	if err != nil {
+		return domain.AuthProfile{}, fmt.Errorf("service: find auth profile: %w", err)
+	}
+	if !exists {
+		return domain.AuthProfile{}, ErrProfileNotFound
+	}
+
+	return profile, nil
 }
 
 func isValidEthereumSignature(signature string) bool {

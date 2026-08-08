@@ -74,7 +74,7 @@ profile can use this token for registration; their profile fields are `null`:
 ```json
 {
   "accessToken": "eyJ...",
-  "isRegistered": false,
+  "isNotRegistered": true,
   "address": "0x1234567890123456789012345678901234567890",
   "name": null,
   "role": null,
@@ -85,6 +85,35 @@ profile can use this token for registration; their profile fields are `null`:
 Registered roles are returned as `supporter` or `fundraiser`. A message is
 short-lived and single-use; expired, unknown, invalid, or replayed messages
 are rejected.
+
+## Get authenticated profile
+
+`GET /v1/auth/me` retrieves the registered profile associated with the wallet
+address in the access token:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+A registered wallet receives:
+
+```json
+{
+  "status": "success",
+  "code": "PROFILE_RETRIEVED",
+  "message": "Profile retrieved successfully.",
+  "data": {
+    "address": "0x1234567890123456789012345678901234567890",
+    "name": "Cat Lover",
+    "role": "supporter",
+    "imageUrl": "http://localhost:9000/pawfund/profiles/cat.png"
+  },
+  "errors": null
+}
+```
+
+If the token is valid but its wallet has no registered supporter or fundraiser
+profile, the endpoint returns HTTP `404` with code `PROFILE_NOT_FOUND`.
 
 ## Register supporter
 

@@ -159,18 +159,18 @@ func TestAuthEndpoints(t *testing.T) {
 			}
 
 			var data struct {
-				AccessToken  string           `json:"accessToken"`
-				IsRegistered bool             `json:"isRegistered"`
-				Address      string           `json:"address"`
-				Name         *string          `json:"name"`
-				Role         *domain.UserRole `json:"role"`
-				ImageURL     *string          `json:"imageUrl"`
+				AccessToken     string           `json:"accessToken"`
+				IsNotRegistered bool             `json:"isNotRegistered"`
+				Address         string           `json:"address"`
+				Name            *string          `json:"name"`
+				Role            *domain.UserRole `json:"role"`
+				ImageURL        *string          `json:"imageUrl"`
 			}
 			if err := json.Unmarshal(verified.Data, &data); err != nil {
 				t.Fatalf("decode verify data: %v", err)
 			}
-			if data.IsRegistered != test.wantRegistered || data.Address != walletAddress {
-				t.Errorf("auth identity = registered:%v address:%q", data.IsRegistered, data.Address)
+			if data.IsNotRegistered == test.wantRegistered || data.Address != walletAddress {
+				t.Errorf("auth identity = registered:%v address:%q", !data.IsNotRegistered, data.Address)
 			}
 			if !equalStringPointers(data.Name, test.wantName) || !equalRoles(data.Role, test.wantRole) || !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("profile = name:%v role:%v image:%v", data.Name, data.Role, data.ImageURL)
@@ -181,6 +181,126 @@ func TestAuthEndpoints(t *testing.T) {
 			}
 			if principal.WalletAddress != walletAddress {
 				t.Errorf("token wallet = %q, want %q", principal.WalletAddress, walletAddress)
+			}
+		})
+	}
+}
+
+func TestGetMeEndpoint(t *testing.T) {
+	imageKey := "profiles/cat photo.png"
+	tests := []struct {
+		name          string
+		prepare       func(t *testing.T, walletAddress string)
+		authorization string
+		wantHTTP      int
+		wantCode      string
+		wantName      string
+		wantRole      domain.UserRole
+		wantImageURL  *string
+	}{
+		{
+			name: "returns supporter profile",
+			prepare: func(t *testing.T, walletAddress string) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				supporter := newSupporter("cat@example.com", walletAddress, &imageKey)
+				supporter.Name = "Cat Lover"
+				mustCreateSupporter(t, repo, supporter)
+			},
+			authorization: "valid",
+			wantHTTP:      http.StatusOK,
+			wantCode:      "PROFILE_RETRIEVED",
+			wantName:      "Cat Lover",
+			wantRole:      domain.UserRoleSupporter,
+			wantImageURL:  integrationStringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
+		},
+		{
+			name: "returns fundraiser profile without image",
+			prepare: func(t *testing.T, walletAddress string) {
+				mustCreateFundraiserProfile(t, walletAddress, nil)
+			},
+			authorization: "valid",
+			wantHTTP:      http.StatusOK,
+			wantCode:      "PROFILE_RETRIEVED",
+			wantName:      "Paw Rescue",
+			wantRole:      domain.UserRoleFundraiser,
+		},
+		{
+			name:          "returns not found for unregistered wallet",
+			authorization: "valid",
+			wantHTTP:      http.StatusNotFound,
+			wantCode:      "PROFILE_NOT_FOUND",
+		},
+		{
+			name:     "requires access token",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "ACCESS_TOKEN_REQUIRED",
+		},
+		{
+			name:          "rejects invalid access token",
+			authorization: "invalid",
+			wantHTTP:      http.StatusUnauthorized,
+			wantCode:      "INVALID_ACCESS_TOKEN",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanTestState(t)
+			t.Cleanup(func() { cleanTestState(t) })
+
+			privateKey := integrationPrivateKey(t)
+			walletAddress := crypto.PubkeyToAddress(privateKey.PublicKey).Hex()
+			if test.prepare != nil {
+				test.prepare(t, walletAddress)
+			}
+
+			router, jwtManager := newAuthIntegrationRouter(t, 5*time.Minute)
+			request := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+			switch test.authorization {
+			case "valid":
+				token, err := jwtManager.Generate(walletAddress, time.Hour)
+				if err != nil {
+					t.Fatalf("generate access token: %v", err)
+				}
+				request.Header.Set("Authorization", "Bearer "+token)
+			case "invalid":
+				request.Header.Set("Authorization", "Bearer invalid-token")
+			}
+
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			result := decodeAuthEndpointResult(t, response)
+			if result.HTTPStatus != test.wantHTTP || result.Code != test.wantCode {
+				t.Fatalf(
+					"get me = %d/%q, want %d/%q; body: %s",
+					result.HTTPStatus,
+					result.Code,
+					test.wantHTTP,
+					test.wantCode,
+					result.Body,
+				)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data struct {
+				Address  string          `json:"address"`
+				Name     string          `json:"name"`
+				Role     domain.UserRole `json:"role"`
+				ImageURL *string         `json:"imageUrl"`
+			}
+			if err := json.Unmarshal(result.Data, &data); err != nil {
+				t.Fatalf("decode get me data: %v", err)
+			}
+			if data.Address != walletAddress || data.Name != test.wantName || data.Role != test.wantRole {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
 			}
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
@@ -25,6 +26,10 @@ type authServiceStub struct {
 	requestedAddress  string
 	verifiedMessage   string
 	verifiedSignature string
+	getMeProfile      domain.AuthProfile
+	getMeErr          error
+	getMeAddress      string
+	getMeCalls        int
 }
 
 func (s *authServiceStub) CreateMessage(_ context.Context, walletAddress string) (string, error) {
@@ -40,6 +45,15 @@ func (s *authServiceStub) Verify(
 	s.verifiedMessage = message
 	s.verifiedSignature = signature
 	return s.verifyResult, s.verifyErr
+}
+
+func (s *authServiceStub) GetMe(
+	_ context.Context,
+	walletAddress string,
+) (domain.AuthProfile, error) {
+	s.getMeCalls++
+	s.getMeAddress = walletAddress
+	return s.getMeProfile, s.getMeErr
 }
 
 func TestAuthHandlerHandleCreateMessage(t *testing.T) {
@@ -295,6 +309,138 @@ func TestAuthHandlerHandleVerify(t *testing.T) {
 				if test.wantIsNotRegistered && (data.Name != nil || data.Role != nil || data.ImageURL != nil) {
 					t.Errorf("unregistered profile fields = %#v", data)
 				}
+			}
+		})
+	}
+}
+
+func TestAuthHandlerHandleGetMe(t *testing.T) {
+	imageKey := "profiles/cat photo.png"
+	tests := []struct {
+		name             string
+		principal        *auth.Principal
+		profile          domain.AuthProfile
+		serviceErr       error
+		wantHTTP         int
+		wantCode         string
+		wantServiceCalls int
+		wantAddress      string
+		wantName         string
+		wantRole         domain.UserRole
+		wantImageURL     *string
+	}{
+		{
+			name:      "returns authenticated supporter profile",
+			principal: &auth.Principal{WalletAddress: " 0x1234567890123456789012345678901234567890 "},
+			profile: domain.AuthProfile{
+				Name:           "Cat Lover",
+				Role:           domain.UserRoleSupporter,
+				ImageObjectKey: &imageKey,
+			},
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0x1234567890123456789012345678901234567890",
+			wantName:         "Cat Lover",
+			wantRole:         domain.UserRoleSupporter,
+			wantImageURL:     stringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
+		},
+		{
+			name:      "returns fundraiser profile without image",
+			principal: &auth.Principal{WalletAddress: "0x2234567890123456789012345678901234567890"},
+			profile: domain.AuthProfile{
+				Name: "Paw Rescue",
+				Role: domain.UserRoleFundraiser,
+			},
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0x2234567890123456789012345678901234567890",
+			wantName:         "Paw Rescue",
+			wantRole:         domain.UserRoleFundraiser,
+		},
+		{
+			name:     "requires authenticated principal",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:      "rejects blank wallet claim",
+			principal: &auth.Principal{WalletAddress: " "},
+			wantHTTP:  http.StatusUnauthorized,
+			wantCode:  "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:             "maps missing profile",
+			principal:        &auth.Principal{WalletAddress: "0x3234567890123456789012345678901234567890"},
+			serviceErr:       service.ErrProfileNotFound,
+			wantHTTP:         http.StatusNotFound,
+			wantCode:         "PROFILE_NOT_FOUND",
+			wantServiceCalls: 1,
+			wantAddress:      "0x3234567890123456789012345678901234567890",
+		},
+		{
+			name:             "maps internal failure",
+			principal:        &auth.Principal{WalletAddress: "0x4234567890123456789012345678901234567890"},
+			serviceErr:       errors.New("database unavailable"),
+			wantHTTP:         http.StatusInternalServerError,
+			wantCode:         "INTERNAL_SERVER_ERROR",
+			wantServiceCalls: 1,
+			wantAddress:      "0x4234567890123456789012345678901234567890",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &authServiceStub{getMeProfile: test.profile, getMeErr: test.serviceErr}
+			handler := newTestAuthHandler(t, serviceStub)
+			request := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetMe(response, request)
+
+			decoded := decodeAuthResponse(t, response)
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf(
+					"status/code = %d/%q, want %d/%q; body: %s",
+					response.Code,
+					decoded.Code,
+					test.wantHTTP,
+					test.wantCode,
+					response.Body.String(),
+				)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusUnauthorized && response.Header().Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q", response.Header().Get("WWW-Authenticate"))
+			}
+			if serviceStub.getMeCalls != test.wantServiceCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.getMeCalls, test.wantServiceCalls)
+			}
+			if serviceStub.getMeAddress != test.wantAddress {
+				t.Errorf("service address = %q, want %q", serviceStub.getMeAddress, test.wantAddress)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data getMeResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode get me data: %v", err)
+			}
+			if data.Address != test.wantAddress || data.Name != test.wantName || data.Role != test.wantRole {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
+			}
+			if strings.Contains(string(decoded.Data), "ImageObjectKey") || strings.Contains(string(decoded.Data), "imageObjectKey") {
+				t.Errorf("response leaks image object key: %s", decoded.Data)
 			}
 		})
 	}

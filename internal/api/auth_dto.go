@@ -65,3 +65,10 @@ type verifyAuthResponse struct {
 	Role            *domain.UserRole `json:"role"`
 	ImageURL        *string          `json:"imageUrl"`
 }
+
+type getMeResponse struct {
+	Address  string          `json:"address"`
+	Name     string          `json:"name"`
+	Role     domain.UserRole `json:"role"`
+	ImageURL *string         `json:"imageUrl"`
+}
