@@ -134,7 +134,7 @@ func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	response := getProfileResponse{
+	response := getFundraiserProfileResponse{
 		Name:  fundraiser.Name,
 		Email: fundraiser.Email,
 		ContactPerson: fundraiserContactPerson{

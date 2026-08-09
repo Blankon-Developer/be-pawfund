@@ -125,7 +125,7 @@ type registerFundraiserResponse struct {
 	Role          domain.UserRole         `json:"role"`
 }
 
-type getProfileResponse struct {
+type getFundraiserProfileResponse struct {
 	Name          string                  `json:"name"`
 	Email         string                  `json:"email"`
 	ContactPerson fundraiserContactPerson `json:"contactPerson"`

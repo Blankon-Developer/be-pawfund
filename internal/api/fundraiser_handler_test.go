@@ -398,7 +398,7 @@ func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
 				return
 			}
 
-			var data getProfileResponse
+			var data getFundraiserProfileResponse
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode profile data: %v", err)
 			}
