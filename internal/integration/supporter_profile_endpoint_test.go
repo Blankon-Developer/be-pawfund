@@ -101,7 +101,7 @@ func TestGetSupporterProfileEndpoint(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
 			switch test.authorization {
 			case "valid":
-				token, err := jwtManager.Generate(test.walletAddress, time.Hour)
+				token, err := jwtManager.Generate(test.walletAddress, "", time.Hour)
 				if err != nil {
 					t.Fatalf("generate access token: %v", err)
 				}

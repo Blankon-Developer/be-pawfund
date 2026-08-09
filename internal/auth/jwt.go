@@ -6,13 +6,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/golang-jwt/jwt/v5"
 )
 
 var ErrInvalidToken = errors.New("invalid access token")
 
 type Claims struct {
-	WalletAddress string `json:"wallet_address"`
+	WalletAddress string          `json:"wallet_address"`
+	Role          domain.UserRole `json:"role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -29,10 +31,17 @@ func NewJWTManager(secret []byte) (*JWTManager, error) {
 	return &JWTManager{secret: secretCopy}, nil
 }
 
-func (m *JWTManager) Generate(walletAddress string, ttl time.Duration) (string, error) {
+func (m *JWTManager) Generate(
+	walletAddress string,
+	role domain.UserRole,
+	ttl time.Duration,
+) (string, error) {
 	walletAddress = strings.TrimSpace(walletAddress)
 	if walletAddress == "" {
 		return "", fmt.Errorf("auth: wallet address is required")
+	}
+	if !isSupportedRole(role) {
+		return "", fmt.Errorf("auth: unsupported role %q", role)
 	}
 	if ttl <= 0 {
 		return "", fmt.Errorf("auth: token TTL must be positive")
@@ -41,6 +50,7 @@ func (m *JWTManager) Generate(walletAddress string, ttl time.Duration) (string, 
 	now := time.Now()
 	claims := Claims{
 		WalletAddress: walletAddress,
+		Role:          role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -68,6 +78,13 @@ func (m *JWTManager) Verify(tokenString string) (Principal, error) {
 	if claims.WalletAddress == "" {
 		return Principal{}, fmt.Errorf("%w: wallet_address claim is required", ErrInvalidToken)
 	}
+	if !isSupportedRole(claims.Role) {
+		return Principal{}, fmt.Errorf("%w: unsupported role %q", ErrInvalidToken, claims.Role)
+	}
 
-	return Principal{WalletAddress: claims.WalletAddress}, nil
+	return Principal{WalletAddress: claims.WalletAddress, Role: claims.Role}, nil
+}
+
+func isSupportedRole(role domain.UserRole) bool {
+	return role == "" || role == domain.UserRoleSupporter || role == domain.UserRoleFundraiser
 }

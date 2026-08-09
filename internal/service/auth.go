@@ -42,7 +42,7 @@ type AuthProfileRepository interface {
 }
 
 type AccessTokenGenerator interface {
-	Generate(walletAddress string, ttl time.Duration) (string, error)
+	Generate(walletAddress string, role domain.UserRole, ttl time.Duration) (string, error)
 }
 
 type VerifyAuthResult struct {
@@ -155,7 +155,11 @@ func (s *AuthService) Verify(
 		return VerifyAuthResult{}, fmt.Errorf("service: find auth profile: %w", err)
 	}
 
-	accessToken, err := s.tokenGenerator.Generate(address, s.config.AccessTokenTTL)
+	var role domain.UserRole
+	if registered {
+		role = profile.Role
+	}
+	accessToken, err := s.tokenGenerator.Generate(address, role, s.config.AccessTokenTTL)
 	if err != nil {
 		return VerifyAuthResult{}, fmt.Errorf("service: generate access token: %w", err)
 	}

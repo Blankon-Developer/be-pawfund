@@ -182,6 +182,13 @@ func TestAuthEndpoints(t *testing.T) {
 			if principal.WalletAddress != walletAddress {
 				t.Errorf("token wallet = %q, want %q", principal.WalletAddress, walletAddress)
 			}
+			var wantTokenRole domain.UserRole
+			if test.wantRole != nil {
+				wantTokenRole = *test.wantRole
+			}
+			if principal.Role != wantTokenRole {
+				t.Errorf("token role = %q, want %q", principal.Role, wantTokenRole)
+			}
 		})
 	}
 }
@@ -258,7 +265,7 @@ func TestGetMeEndpoint(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
 			switch test.authorization {
 			case "valid":
-				token, err := jwtManager.Generate(walletAddress, time.Hour)
+				token, err := jwtManager.Generate(walletAddress, "", time.Hour)
 				if err != nil {
 					t.Fatalf("generate access token: %v", err)
 				}

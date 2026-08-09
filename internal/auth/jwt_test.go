@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -16,17 +17,21 @@ func TestJWTManagerGenerate(t *testing.T) {
 	tests := []struct {
 		name          string
 		walletAddress string
+		role          domain.UserRole
 		ttl           time.Duration
 		wantError     bool
 	}{
-		{name: "generates token", walletAddress: " 0xabc ", ttl: time.Hour},
+		{name: "generates legacy-compatible token without role", walletAddress: " 0xabc ", ttl: time.Hour},
+		{name: "generates supporter token", walletAddress: "0xsupporter", role: domain.UserRoleSupporter, ttl: time.Hour},
+		{name: "generates fundraiser token", walletAddress: "0xfundraiser", role: domain.UserRoleFundraiser, ttl: time.Hour},
 		{name: "rejects empty wallet", walletAddress: " ", ttl: time.Hour, wantError: true},
+		{name: "rejects unknown role", walletAddress: "0xabc", role: domain.UserRole("admin"), ttl: time.Hour, wantError: true},
 		{name: "rejects non-positive TTL", walletAddress: "0xabc", ttl: 0, wantError: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			token, err := manager.Generate(test.walletAddress, test.ttl)
+			token, err := manager.Generate(test.walletAddress, test.role, test.ttl)
 			if test.wantError {
 				if err == nil {
 					t.Fatal("Generate() expected an error")
@@ -43,6 +48,9 @@ func TestJWTManagerGenerate(t *testing.T) {
 			if principal.WalletAddress != strings.TrimSpace(test.walletAddress) {
 				t.Errorf("wallet address = %q", principal.WalletAddress)
 			}
+			if principal.Role != test.role {
+				t.Errorf("role = %q, want %q", principal.Role, test.role)
+			}
 		})
 	}
 }
@@ -57,6 +65,7 @@ func TestJWTManagerVerify(t *testing.T) {
 		name       string
 		token      func(t *testing.T) string
 		wantWallet string
+		wantRole   domain.UserRole
 		wantError  bool
 	}{
 		{
@@ -70,6 +79,33 @@ func TestJWTManagerVerify(t *testing.T) {
 				})
 			},
 			wantWallet: "0xvalid",
+		},
+		{
+			name: "accepts a known role",
+			token: func(t *testing.T) string {
+				return signClaims(t, secret, jwt.SigningMethodHS256, Claims{
+					WalletAddress: "0xsupporter",
+					Role:          domain.UserRoleSupporter,
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+					},
+				})
+			},
+			wantWallet: "0xsupporter",
+			wantRole:   domain.UserRoleSupporter,
+		},
+		{
+			name: "rejects an unknown role",
+			token: func(t *testing.T) string {
+				return signClaims(t, secret, jwt.SigningMethodHS256, Claims{
+					WalletAddress: "0xadmin",
+					Role:          domain.UserRole("admin"),
+					RegisteredClaims: jwt.RegisteredClaims{
+						ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+					},
+				})
+			},
+			wantError: true,
 		},
 		{
 			name: "rejects wrong signature",
@@ -142,12 +178,15 @@ func TestJWTManagerVerify(t *testing.T) {
 			if principal.WalletAddress != test.wantWallet {
 				t.Errorf("wallet address = %q, want %q", principal.WalletAddress, test.wantWallet)
 			}
+			if principal.Role != test.wantRole {
+				t.Errorf("role = %q, want %q", principal.Role, test.wantRole)
+			}
 		})
 	}
 }
 
 func TestPrincipalContext(t *testing.T) {
-	want := Principal{WalletAddress: "0xcontext"}
+	want := Principal{WalletAddress: "0xcontext", Role: domain.UserRoleFundraiser}
 	ctx := ContextWithPrincipal(context.Background(), want)
 	got, ok := PrincipalFromContext(ctx)
 	if !ok || got != want {

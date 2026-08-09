@@ -71,11 +71,17 @@ type authTokenGeneratorStub struct {
 	token   string
 	err     error
 	address string
+	role    domain.UserRole
 	ttl     time.Duration
 }
 
-func (g *authTokenGeneratorStub) Generate(walletAddress string, ttl time.Duration) (string, error) {
+func (g *authTokenGeneratorStub) Generate(
+	walletAddress string,
+	role domain.UserRole,
+	ttl time.Duration,
+) (string, error) {
 	g.address = walletAddress
+	g.role = role
 	g.ttl = ttl
 	return g.token, g.err
 }
@@ -169,10 +175,17 @@ func TestAuthServiceVerify(t *testing.T) {
 		prepare              func(t *testing.T, fixture *authVerifyFixture)
 		wantError            error
 		wantProfile          bool
+		wantTokenRole        domain.UserRole
 		wantMessageRemaining bool
 	}{
 		{name: "verifies unregistered wallet"},
-		{name: "returns registered profile", profile: profile, registered: true, wantProfile: true},
+		{
+			name:          "returns registered profile",
+			profile:       profile,
+			registered:    true,
+			wantProfile:   true,
+			wantTokenRole: domain.UserRoleSupporter,
+		},
 		{
 			name: "rejects malformed message",
 			prepare: func(_ *testing.T, fixture *authVerifyFixture) {
@@ -300,6 +313,9 @@ func TestAuthServiceVerify(t *testing.T) {
 				}
 				if fixture.tokenGenerator.ttl != testAuthConfig().AccessTokenTTL {
 					t.Errorf("token TTL = %v", fixture.tokenGenerator.ttl)
+				}
+				if fixture.tokenGenerator.role != test.wantTokenRole {
+					t.Errorf("token role = %q, want %q", fixture.tokenGenerator.role, test.wantTokenRole)
 				}
 			}
 

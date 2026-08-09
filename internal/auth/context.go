@@ -1,9 +1,14 @@
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+)
 
 type Principal struct {
 	WalletAddress string
+	Role          domain.UserRole
 }
 
 type principalContextKey struct{}

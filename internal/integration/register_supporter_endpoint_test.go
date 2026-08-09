@@ -138,7 +138,7 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 
 			authorization := test.authorization
 			if authorization == "" {
-				token, err := jwtManager.Generate(test.walletAddress, time.Hour)
+				token, err := jwtManager.Generate(test.walletAddress, "", time.Hour)
 				if err != nil {
 					t.Fatalf("generate access token: %v", err)
 				}
