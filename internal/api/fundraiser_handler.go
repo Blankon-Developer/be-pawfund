@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
+	"github.com/go-chi/chi/v5"
 )
 
 const maxRegisterFundraiserBodyBytes = 1 << 20
@@ -134,7 +136,7 @@ func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	response := getFundraiserProfileResponse{
+	response := myFundraiserProfileResponse{
 		Name:  fundraiser.Name,
 		Email: fundraiser.Email,
 		ContactPerson: fundraiserContactPerson{
@@ -146,6 +148,43 @@ func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Requ
 		ZipCode:       fundraiser.ZipCode,
 		ImageURL:      h.urlBuilder.Build(fundraiser.ImageObjectKey),
 		WalletAddress: fundraiser.WalletAddress,
+	}
+	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
+}
+
+func (h *FundraiserHandler) HandleGetPublicProfile(w http.ResponseWriter, r *http.Request) {
+	walletAddress := strings.TrimSpace(chi.URLParam(r, "address"))
+
+	fundraiser, err := h.service.GetProfile(r.Context(), walletAddress)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No fundraiser profile is registered for the requested wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get public fundraiser profile", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := publicFundraiserProfileResponse{
+		Name:  fundraiser.Name,
+		Email: fundraiser.Email,
+		ContactPerson: fundraiserContactPerson{
+			Name:  fundraiser.ContactName,
+			Phone: fundraiser.ContactPhone,
+		},
+		SocialURL: valueOrEmpty(fundraiser.SocialURL),
+		Country:   fundraiser.Country,
+		ZipCode:   fundraiser.ZipCode,
+		ImageURL:  h.urlBuilder.Build(fundraiser.ImageObjectKey),
+		CreatedAt: fundraiser.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
 }

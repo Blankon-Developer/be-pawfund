@@ -11,12 +11,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
+	"github.com/go-chi/chi/v5"
 )
 
 type stubFundraiserRegistrar struct {
@@ -398,7 +400,7 @@ func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
 				return
 			}
 
-			var data getFundraiserProfileResponse
+			var data myFundraiserProfileResponse
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode profile data: %v", err)
 			}
@@ -416,6 +418,153 @@ func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
 			}
 			if strings.Contains(string(decoded.Data), "imageObjectKey") || strings.Contains(string(decoded.Data), `"role"`) {
 				t.Errorf("response leaks internal fields: %s", decoded.Data)
+			}
+		})
+	}
+}
+
+func TestFundraiserHandlerHandleGetPublicProfile(t *testing.T) {
+	imageKey := "profiles/rescue photo.png"
+	socialURL := "https://example.com/rescue"
+	createdAt := time.Date(2026, time.August, 9, 10, 30, 0, 0, time.FixedZone("WIB", 7*60*60))
+	profile := domain.Fundraiser{
+		User: domain.User{
+			Role:          domain.UserRoleFundraiser,
+			Email:         "rescue@example.com",
+			WalletAddress: "0xWalletChecksum",
+			CreatedAt:     createdAt,
+		},
+		Name:           "Animal Rescue",
+		ImageObjectKey: &imageKey,
+		ContactName:    "Jane Doe",
+		ContactPhone:   "+62 812 3456",
+		SocialURL:      &socialURL,
+		Country:        "Indonesia",
+		ZipCode:        "10110",
+	}
+	profileWithoutOptionalFields := profile
+	profileWithoutOptionalFields.ImageObjectKey = nil
+	profileWithoutOptionalFields.SocialURL = nil
+	unexpectedFailure := errors.New("unexpected failure")
+
+	tests := []struct {
+		name             string
+		address          string
+		profile          domain.Fundraiser
+		serviceError     error
+		wantHTTP         int
+		wantCode         string
+		wantServiceCalls int
+		wantAddress      string
+		wantImageURL     *string
+		wantSocialURL    string
+	}{
+		{
+			name:             "returns public fundraiser profile for path address",
+			address:          " 0xwalletchecksum ",
+			profile:          profile,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xwalletchecksum",
+			wantImageURL:     stringPointer("https://cdn.example.com/pawfund/profiles/rescue%20photo.png"),
+			wantSocialURL:    socialURL,
+		},
+		{
+			name:             "returns null image and empty social URL when omitted",
+			address:          "0xWalletChecksum",
+			profile:          profileWithoutOptionalFields,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+		{
+			name:             "maps missing fundraiser profile",
+			address:          "0xMissing",
+			serviceError:     service.ErrProfileNotFound,
+			wantHTTP:         http.StatusNotFound,
+			wantCode:         "PROFILE_NOT_FOUND",
+			wantServiceCalls: 1,
+			wantAddress:      "0xMissing",
+		},
+		{
+			name:             "hides unexpected service error",
+			address:          "0xWalletChecksum",
+			serviceError:     unexpectedFailure,
+			wantHTTP:         http.StatusInternalServerError,
+			wantCode:         "INTERNAL_SERVER_ERROR",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &stubFundraiserRegistrar{
+				profile:       test.profile,
+				getProfileErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			handler := NewFundraiserHandler(serviceStub, urlBuilder, logger)
+			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/test", nil)
+			routeContext := chi.NewRouteContext()
+			routeContext.URLParams.Add("address", test.address)
+			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+			response := httptest.NewRecorder()
+
+			handler.HandleGetPublicProfile(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf(
+					"status/code = %d/%q, want %d/%q; body: %s",
+					response.Code,
+					decoded.Code,
+					test.wantHTTP,
+					test.wantCode,
+					response.Body.String(),
+				)
+			}
+			if serviceStub.getProfileCalls != test.wantServiceCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.getProfileCalls, test.wantServiceCalls)
+			}
+			if serviceStub.getProfileAddress != test.wantAddress {
+				t.Errorf("service address = %q, want %q", serviceStub.getProfileAddress, test.wantAddress)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data publicFundraiserProfileResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode profile data: %v", err)
+			}
+			if data.Name != profile.Name || data.Email != profile.Email {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if data.ContactPerson.Name != profile.ContactName || data.ContactPerson.Phone != profile.ContactPhone {
+				t.Errorf("contact person = %#v", data.ContactPerson)
+			}
+			if data.SocialURL != test.wantSocialURL || data.Country != profile.Country || data.ZipCode != profile.ZipCode {
+				t.Errorf("profile details = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", pointerValue(data.ImageURL), pointerValue(test.wantImageURL))
+			}
+			wantCreatedAt := profile.CreatedAt.UTC().Format(time.RFC3339)
+			if data.CreatedAt != wantCreatedAt {
+				t.Errorf("createdAt = %q, want %q", data.CreatedAt, wantCreatedAt)
+			}
+			if strings.Contains(string(decoded.Data), "walletAddress") || strings.Contains(string(decoded.Data), "imageObjectKey") || strings.Contains(string(decoded.Data), `"role"`) {
+				t.Errorf("response leaks non-public fields: %s", decoded.Data)
 			}
 		})
 	}

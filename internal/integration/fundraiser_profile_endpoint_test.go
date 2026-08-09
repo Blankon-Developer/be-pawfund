@@ -165,6 +165,105 @@ func TestGetFundraiserProfileEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetPublicFundraiserProfileEndpoint(t *testing.T) {
+	const fundraiserWallet = "0xFundraiserChecksum"
+	imageKey := "profiles/rescue photo.png"
+
+	tests := []struct {
+		name         string
+		prepare      func(t *testing.T)
+		address      string
+		wantHTTP     int
+		wantCode     string
+		wantImageURL *string
+	}{
+		{
+			name: "returns fundraiser profile without access token",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &imageKey))
+			},
+			address:      strings.ToLower(fundraiserWallet),
+			wantHTTP:     http.StatusOK,
+			wantCode:     "PROFILE_RETRIEVED",
+			wantImageURL: integrationStringPointer("https://cdn.example.com/pawfund/profiles/rescue%20photo.png"),
+		},
+		{
+			name:     "returns not found for unknown wallet",
+			address:  "0xUnknown",
+			wantHTTP: http.StatusNotFound,
+			wantCode: "PROFILE_NOT_FOUND",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			if test.prepare != nil {
+				test.prepare(t)
+			}
+
+			router, _ := newFundraiserProfileIntegrationRouter(t)
+			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/"+test.address, nil)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			result := decodeAuthEndpointResult(t, response)
+			if result.HTTPStatus != test.wantHTTP || result.Code != test.wantCode {
+				t.Fatalf(
+					"get public fundraiser profile = %d/%q, want %d/%q; body: %s",
+					result.HTTPStatus,
+					result.Code,
+					test.wantHTTP,
+					test.wantCode,
+					result.Body,
+				)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data struct {
+				Name          string `json:"name"`
+				Email         string `json:"email"`
+				ContactPerson struct {
+					Name  string `json:"name"`
+					Phone string `json:"phone"`
+				} `json:"contactPerson"`
+				SocialURL string  `json:"socialUrl"`
+				Country   string  `json:"country"`
+				ZipCode   string  `json:"zipCode"`
+				ImageURL  *string `json:"imageUrl"`
+				CreatedAt string  `json:"createdAt"`
+			}
+			if err := json.Unmarshal(result.Data, &data); err != nil {
+				t.Fatalf("decode public profile data: %v", err)
+			}
+			if data.Name != "Animal Rescue" || data.Email != "rescue@example.com" {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if data.ContactPerson.Name != "Jane Doe" || data.ContactPerson.Phone != "+62 812 3456" {
+				t.Errorf("contact person = %#v", data.ContactPerson)
+			}
+			if data.SocialURL != "https://example.com/rescue" || data.Country != "Indonesia" || data.ZipCode != "10110" {
+				t.Errorf("profile details = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
+			}
+			createdAt, err := time.Parse(time.RFC3339, data.CreatedAt)
+			if err != nil {
+				t.Errorf("createdAt = %q, want RFC3339 UTC: %v", data.CreatedAt, err)
+			} else if data.CreatedAt != createdAt.UTC().Format(time.RFC3339) {
+				t.Errorf("createdAt = %q, want UTC RFC3339", data.CreatedAt)
+			}
+			if strings.Contains(string(result.Data), "walletAddress") || strings.Contains(string(result.Data), "imageObjectKey") || strings.Contains(string(result.Data), `"role"`) {
+				t.Errorf("response leaks non-public fields: %s", result.Data)
+			}
+		})
+	}
+}
+
 func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

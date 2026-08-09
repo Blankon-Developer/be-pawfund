@@ -838,6 +838,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "status": { "type": "string", "enum": ["success"] },
                     "code": { "type": "string" },
                     "message": { "type": "string" },
                     "data": {
@@ -855,9 +856,9 @@
                         },
                         "socialUrl": { "type": "string" },
                         "country": { "type": "string" },
-                        "zipCode": { "type": "number" },
-                        "createdAt": { "type": "string" },
-                        "imageUrl": { "type": "string" }
+                        "zipCode": { "type": "string" },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "imageUrl": { "type": "string", "format": "uri", "nullable": true }
                       },
                       "required": [
                         "name",
@@ -869,9 +870,35 @@
                         "createdAt",
                         "imageUrl"
                       ]
+                    },
+                    "errors": {
+                      "type": "object",
+                      "nullable": true,
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                      }
                     }
                   },
-                  "required": ["code", "message", "data"]
+                  "required": ["status", "code", "message", "data", "errors"]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fundraiser profile is registered for the supplied wallet address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "enum": ["error"] },
+                    "code": { "type": "string", "enum": ["PROFILE_NOT_FOUND"] },
+                    "message": { "type": "string" },
+                    "data": { "type": "object", "nullable": true },
+                    "errors": { "type": "object", "nullable": true }
+                  },
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
