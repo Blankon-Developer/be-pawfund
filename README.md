@@ -5,13 +5,20 @@ Backend API for Pawfund.
 ## Local configuration
 
 Copy `.env.example` to `.env` and replace `JWT_SECRET` with at least 32 random
-bytes. The storage public base URL must already include the public bucket name.
+bytes. `STORAGE_ENDPOINT` must be an HTTP(S) origin reachable by the frontend,
+while the storage public base URL must already include the public bucket name.
 
 ```dotenv
 HTTP_ADDR=:8080
 DATABASE_URL=postgres://pawfund:pawfund@localhost:5432/pawfund?sslmode=disable
 JWT_SECRET=replace-this-with-at-least-32-random-bytes
 STORAGE_PUBLIC_BASE_URL=http://localhost:9000/pawfund
+STORAGE_ENDPOINT=http://localhost:9000
+STORAGE_ACCESS_KEY=minioadmin
+STORAGE_SECRET_KEY=minioadmin
+STORAGE_BUCKET=pawfund
+STORAGE_REGION=us-east-1
+STORAGE_PRESIGN_TTL=15m
 CACHE_URL=redis://localhost:6379/0
 CACHE_KEY_PREFIX=pawfund
 SIWE_DOMAIN=localhost:3000
@@ -32,8 +39,10 @@ go run github.com/pressly/goose/v3/cmd/goose@v3.27.3 -dir migrations postgres "$
 go run ./cmd/api
 ```
 
-`STORAGE_PUBLIC_BASE_URL` only builds public object URLs. Bucket creation,
-uploads, and bucket access policies are managed separately.
+`STORAGE_REGION` defaults to `us-east-1`, and `STORAGE_PRESIGN_TTL` defaults to
+`15m`. The application does not create the bucket. Bucket creation, public-read
+policy, lifecycle rules, and CORS for the frontend origin and `PUT` method are
+managed separately.
 
 ## Sign in with Ethereum
 
@@ -85,6 +94,50 @@ profile can use this token for registration; their profile fields are `null`:
 Registered roles are returned as `supporter` or `fundraiser`. A message is
 short-lived and single-use; expired, unknown, invalid, or replayed messages
 are rejected.
+
+The access token includes `role` for a registered `supporter` or `fundraiser`.
+An unregistered wallet receives a token without the claim. Existing tokens
+without `role` remain valid.
+
+## Presign a profile image upload
+
+`POST /v1/uploads/profile-image/presign` is available to any authenticated
+wallet, including wallets that have not registered a profile. It does not query
+the profile database. The JSON body is limited to 16 KiB:
+
+```http
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "contentType": "image/jpeg",
+  "size": 123456
+}
+```
+
+Only `image/jpeg`, `image/png`, and `image/webp` are accepted. `size` must be
+between 1 and 5242880 bytes. A successful response contains the generated
+object key and a short-lived MinIO PUT URL:
+
+```json
+{
+  "status": "success",
+  "code": "PROFILE_IMAGE_UPLOAD_PRESIGNED",
+  "message": "Profile image upload presigned successfully.",
+  "data": {
+    "objectKey": "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg",
+    "url": "http://localhost:9000/pawfund/profiles/...?X-Amz-..."
+  },
+  "errors": null
+}
+```
+
+Upload the raw file bytes with `PUT`—not multipart form data—and send exactly
+the same `Content-Type` and byte length used in the presign request. Both
+`Content-Type` and `Content-Length` are part of the signature, so MinIO rejects
+a request when either value differs.
 
 ## Get authenticated profile
 
@@ -255,8 +308,8 @@ endpoint returns HTTP `404` with code `PROFILE_NOT_FOUND`.
 ## Tests
 
 Unit and integration tests use table-driven test cases. Integration tests run
-against isolated PostgreSQL and Redis services in the Compose `test` profile
-and apply the real migrations before executing.
+against isolated PostgreSQL, Redis, and MinIO services in the Compose `test`
+profile and apply the real migrations before executing.
 
 ```sh
 make test
