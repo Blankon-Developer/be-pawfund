@@ -124,3 +124,14 @@ type RegisterFundraiserResponse struct {
 	WalletAddress string                  `json:"walletAddress"`
 	Role          domain.UserRole         `json:"role"`
 }
+
+type GetProfileResponse struct {
+	Name          string                  `json:"name"`
+	Email         string                  `json:"email"`
+	ContactPerson FundraiserContactPerson `json:"contactPerson"`
+	SocialURL     string                  `json:"socialUrl"`
+	Country       string                  `json:"country"`
+	ZipCode       string                  `json:"zipCode"`
+	ImageURL      *string                 `json:"imageUrl"`
+	WalletAddress string                  `json:"walletAddress"`
+}

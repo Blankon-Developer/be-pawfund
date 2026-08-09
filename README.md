@@ -216,6 +216,42 @@ must be an absolute HTTP or HTTPS URL. A successful request returns:
 }
 ```
 
+## Get fundraiser profile
+
+`GET /v1/fundraiser/profile` returns the complete fundraiser profile associated
+with the wallet address in the access token:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+A registered fundraiser receives:
+
+```json
+{
+  "status": "success",
+  "code": "PROFILE_RETRIEVED",
+  "message": "Profile retrieved successfully.",
+  "data": {
+    "name": "Animal Rescue",
+    "email": "rescue@example.com",
+    "contactPerson": {
+      "name": "Jane Doe",
+      "phone": "+62 812 3456"
+    },
+    "socialUrl": "https://example.com/rescue",
+    "country": "Indonesia",
+    "zipCode": "10110",
+    "imageUrl": "http://localhost:9000/pawfund/profiles/rescue.png",
+    "walletAddress": "0xabc"
+  },
+  "errors": null
+}
+```
+
+If the authenticated wallet is unregistered or belongs to a supporter, the
+endpoint returns HTTP `404` with code `PROFILE_NOT_FOUND`.
+
 ## Tests
 
 Unit and integration tests use table-driven test cases. Integration tests run
