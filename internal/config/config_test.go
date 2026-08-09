@@ -11,6 +11,10 @@ func TestLoad(t *testing.T) {
 		"DATABASE_URL":            "postgres://test",
 		"JWT_SECRET":              strings.Repeat("s", 32),
 		"STORAGE_PUBLIC_BASE_URL": "https://storage.example.com/bucket",
+		"STORAGE_ENDPOINT":        "https://storage.example.com",
+		"STORAGE_ACCESS_KEY":      "access-key",
+		"STORAGE_SECRET_KEY":      "secret-key",
+		"STORAGE_BUCKET":          "bucket",
 		"CACHE_URL":               "redis://localhost:6379/0",
 		"CACHE_KEY_PREFIX":        "pawfund-test",
 		"SIWE_DOMAIN":             "app.example.com",
@@ -25,6 +29,8 @@ func TestLoad(t *testing.T) {
 		wantError      string
 		wantMessageTTL time.Duration
 		wantJWTTTL     time.Duration
+		wantStorageTTL time.Duration
+		wantRegion     string
 	}{
 		{
 			name:           "uses defaults",
@@ -32,17 +38,23 @@ func TestLoad(t *testing.T) {
 			wantAddress:    defaultHTTPAddr,
 			wantMessageTTL: defaultSIWEMessageTTL,
 			wantJWTTTL:     defaultJWTTTL,
+			wantStorageTTL: defaultStorageTTL,
+			wantRegion:     defaultStorageRegion,
 		},
 		{
 			name: "uses configured HTTP address",
 			environment: mergeEnvironment(validEnvironment, map[string]string{
-				"HTTP_ADDR":        "127.0.0.1:9090",
-				"SIWE_MESSAGE_TTL": "10m",
-				"JWT_TTL":          "2h",
+				"HTTP_ADDR":           "127.0.0.1:9090",
+				"SIWE_MESSAGE_TTL":    "10m",
+				"JWT_TTL":             "2h",
+				"STORAGE_REGION":      "ap-southeast-1",
+				"STORAGE_PRESIGN_TTL": "30m",
 			}),
 			wantAddress:    "127.0.0.1:9090",
 			wantMessageTTL: 10 * time.Minute,
 			wantJWTTTL:     2 * time.Hour,
+			wantStorageTTL: 30 * time.Minute,
+			wantRegion:     "ap-southeast-1",
 		},
 		{
 			name: "requires database URL",
@@ -64,6 +76,48 @@ func TestLoad(t *testing.T) {
 				"STORAGE_PUBLIC_BASE_URL": "",
 			}),
 			wantError: "STORAGE_PUBLIC_BASE_URL is required",
+		},
+		{
+			name: "requires storage endpoint",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_ENDPOINT": "",
+			}),
+			wantError: "STORAGE_ENDPOINT is required",
+		},
+		{
+			name: "requires absolute HTTP storage endpoint",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_ENDPOINT": "localhost:9000",
+			}),
+			wantError: "STORAGE_ENDPOINT must be an absolute HTTP(S) URL",
+		},
+		{
+			name: "rejects storage endpoint path",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_ENDPOINT": "https://storage.example.com/minio",
+			}),
+			wantError: "STORAGE_ENDPOINT must be an HTTP(S) origin",
+		},
+		{
+			name: "requires storage access key",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_ACCESS_KEY": "",
+			}),
+			wantError: "STORAGE_ACCESS_KEY is required",
+		},
+		{
+			name: "requires storage secret key",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_SECRET_KEY": "",
+			}),
+			wantError: "STORAGE_SECRET_KEY is required",
+		},
+		{
+			name: "requires storage bucket",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_BUCKET": "",
+			}),
+			wantError: "STORAGE_BUCKET is required",
 		},
 		{
 			name: "requires cache URL",
@@ -121,6 +175,13 @@ func TestLoad(t *testing.T) {
 			}),
 			wantError: "JWT_TTL must be a positive duration",
 		},
+		{
+			name: "requires positive storage presign TTL",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_PRESIGN_TTL": "0s",
+			}),
+			wantError: "STORAGE_PRESIGN_TTL must be a positive duration",
+		},
 	}
 
 	for _, test := range tests {
@@ -144,6 +205,12 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.JWTTTL != test.wantJWTTTL {
 				t.Errorf("JWTTTL = %v, want %v", cfg.JWTTTL, test.wantJWTTTL)
+			}
+			if cfg.StoragePresignTTL != test.wantStorageTTL {
+				t.Errorf("StoragePresignTTL = %v, want %v", cfg.StoragePresignTTL, test.wantStorageTTL)
+			}
+			if cfg.StorageRegion != test.wantRegion {
+				t.Errorf("StorageRegion = %q, want %q", cfg.StorageRegion, test.wantRegion)
 			}
 		})
 	}
