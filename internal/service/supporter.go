@@ -11,19 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrEmailAlreadyRegistered  = errors.New("email already registered")
-	ErrWalletAlreadyRegistered = errors.New("wallet address already registered")
-)
-
 type RegisterSupporterInput struct {
 	Name           string
 	Email          string
 	WalletAddress  string
 	ImageObjectKey *string
 }
-
-type IDGenerator func() (uuid.UUID, error)
 
 type SupporterService struct {
 	repository repository.SupporterRepository
