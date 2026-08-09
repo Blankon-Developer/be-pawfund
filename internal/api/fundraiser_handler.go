@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
@@ -17,6 +18,7 @@ const maxRegisterFundraiserBodyBytes = 1 << 20
 
 type FundraiserService interface {
 	Register(ctx context.Context, input service.RegisterFundraiserInput) (domain.Fundraiser, error)
+	GetProfile(ctx context.Context, walletAddress string) (domain.Fundraiser, error)
 }
 
 type FundraiserHandler struct {
@@ -95,6 +97,57 @@ func (h *FundraiserHandler) HandleRegisterFundraiser(w http.ResponseWriter, r *h
 		Role:          created.Role,
 	}
 	h.Success(w, http.StatusCreated, "FUNDRAISER_REGISTERED", "Fundraiser account created successfully.", response)
+}
+
+func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	fundraiser, err := h.service.GetProfile(r.Context(), walletAddress)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No fundraiser profile is registered for the authenticated wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get fundraiser profile", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := GetProfileResponse{
+		Name:  fundraiser.Name,
+		Email: fundraiser.Email,
+		ContactPerson: FundraiserContactPerson{
+			Name:  fundraiser.ContactName,
+			Phone: fundraiser.ContactPhone,
+		},
+		SocialURL:     valueOrEmpty(fundraiser.SocialURL),
+		Country:       fundraiser.Country,
+		ZipCode:       fundraiser.ZipCode,
+		ImageURL:      h.urlBuilder.Build(fundraiser.ImageObjectKey),
+		WalletAddress: fundraiser.WalletAddress,
+	}
+	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
 }
 
 func (h *FundraiserHandler) handleServiceError(w http.ResponseWriter, err error) {

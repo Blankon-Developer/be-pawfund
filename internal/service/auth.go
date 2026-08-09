@@ -22,7 +22,6 @@ var (
 	ErrInvalidMessage       = errors.New("invalid SIWE message")
 	ErrInvalidSignature     = errors.New("invalid Ethereum signature")
 	ErrSIWEVerification     = errors.New("SIWE verification failed")
-	ErrProfileNotFound      = errors.New("profile not found")
 )
 
 type AuthConfig struct {

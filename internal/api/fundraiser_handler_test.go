@@ -20,9 +20,13 @@ import (
 )
 
 type stubFundraiserRegistrar struct {
-	err    error
-	called int
-	input  service.RegisterFundraiserInput
+	err               error
+	called            int
+	input             service.RegisterFundraiserInput
+	profile           domain.Fundraiser
+	getProfileErr     error
+	getProfileCalls   int
+	getProfileAddress string
 }
 
 func (s *stubFundraiserRegistrar) Register(
@@ -49,6 +53,18 @@ func (s *stubFundraiserRegistrar) Register(
 		Country:        input.Country,
 		ZipCode:        input.ZipCode,
 	}, nil
+}
+
+func (s *stubFundraiserRegistrar) GetProfile(
+	_ context.Context,
+	walletAddress string,
+) (domain.Fundraiser, error) {
+	s.getProfileCalls++
+	s.getProfileAddress = walletAddress
+	if s.getProfileErr != nil {
+		return domain.Fundraiser{}, s.getProfileErr
+	}
+	return s.profile, nil
 }
 
 func TestHandleRegisterFundraiser(t *testing.T) {
@@ -242,6 +258,164 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 				if strings.Contains(string(decoded.Data), "address") || !strings.Contains(string(decoded.Data), "walletAddress") {
 					t.Errorf("response wallet field is incorrect: %s", decoded.Data)
 				}
+			}
+		})
+	}
+}
+
+func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
+	imageKey := "profiles/rescue photo.png"
+	socialURL := "https://example.com/rescue"
+	profile := domain.Fundraiser{
+		User: domain.User{
+			Role:          domain.UserRoleFundraiser,
+			Email:         "rescue@example.com",
+			WalletAddress: "0xWalletChecksum",
+		},
+		Name:           "Animal Rescue",
+		ImageObjectKey: &imageKey,
+		ContactName:    "Jane Doe",
+		ContactPhone:   "+62 812 3456",
+		SocialURL:      &socialURL,
+		Country:        "Indonesia",
+		ZipCode:        "10110",
+	}
+	profileWithoutOptionalFields := profile
+	profileWithoutOptionalFields.ImageObjectKey = nil
+	profileWithoutOptionalFields.SocialURL = nil
+	unexpectedFailure := errors.New("unexpected failure")
+
+	tests := []struct {
+		name             string
+		principal        *auth.Principal
+		profile          domain.Fundraiser
+		serviceError     error
+		wantHTTP         int
+		wantCode         string
+		wantServiceCalls int
+		wantAddress      string
+		wantImageURL     *string
+		wantSocialURL    string
+	}{
+		{
+			name:             "returns authenticated fundraiser profile",
+			principal:        &auth.Principal{WalletAddress: " 0xWalletChecksum "},
+			profile:          profile,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+			wantImageURL:     stringPointer("https://cdn.example.com/pawfund/profiles/rescue%20photo.png"),
+			wantSocialURL:    socialURL,
+		},
+		{
+			name:             "returns null image and empty social URL when omitted",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			profile:          profileWithoutOptionalFields,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+		{
+			name:     "requires authenticated principal",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:      "rejects blank wallet claim",
+			principal: &auth.Principal{WalletAddress: " "},
+			wantHTTP:  http.StatusUnauthorized,
+			wantCode:  "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:             "maps missing fundraiser profile",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			serviceError:     service.ErrProfileNotFound,
+			wantHTTP:         http.StatusNotFound,
+			wantCode:         "PROFILE_NOT_FOUND",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+		{
+			name:             "hides unexpected service error",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			serviceError:     unexpectedFailure,
+			wantHTTP:         http.StatusInternalServerError,
+			wantCode:         "INTERNAL_SERVER_ERROR",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &stubFundraiserRegistrar{
+				profile:       test.profile,
+				getProfileErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			handler := NewFundraiserHandler(serviceStub, urlBuilder, logger)
+			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/profile", nil)
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetProfile(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf(
+					"status/code = %d/%q, want %d/%q; body: %s",
+					response.Code,
+					decoded.Code,
+					test.wantHTTP,
+					test.wantCode,
+					response.Body.String(),
+				)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusUnauthorized && response.Header().Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q", response.Header().Get("WWW-Authenticate"))
+			}
+			if serviceStub.getProfileCalls != test.wantServiceCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.getProfileCalls, test.wantServiceCalls)
+			}
+			if serviceStub.getProfileAddress != test.wantAddress {
+				t.Errorf("service address = %q, want %q", serviceStub.getProfileAddress, test.wantAddress)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data GetProfileResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode profile data: %v", err)
+			}
+			if data.Name != profile.Name || data.Email != profile.Email || data.WalletAddress != profile.WalletAddress {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if data.ContactPerson.Name != profile.ContactName || data.ContactPerson.Phone != profile.ContactPhone {
+				t.Errorf("contact person = %#v", data.ContactPerson)
+			}
+			if data.SocialURL != test.wantSocialURL || data.Country != profile.Country || data.ZipCode != profile.ZipCode {
+				t.Errorf("profile details = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", pointerValue(data.ImageURL), pointerValue(test.wantImageURL))
+			}
+			if strings.Contains(string(decoded.Data), "imageObjectKey") || strings.Contains(string(decoded.Data), `"role"`) {
+				t.Errorf("response leaks internal fields: %s", decoded.Data)
 			}
 		})
 	}

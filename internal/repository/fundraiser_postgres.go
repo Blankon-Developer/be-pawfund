@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 )
@@ -49,4 +51,62 @@ func (r *PostgresFundraiserRepository) Create(ctx context.Context, fundraiser do
 	}
 
 	return fundraiser, nil
+}
+
+func (r *PostgresFundraiserRepository) FindByWalletAddress(
+	ctx context.Context,
+	walletAddress string,
+) (domain.Fundraiser, bool, error) {
+	const query = `
+		SELECT
+			u.id,
+			u.role,
+			u.email,
+			u.wallet_address,
+			u.created_at,
+			f.name,
+			f.image_object_key,
+			f.contact_name,
+			f.contact_phone,
+			f.social_url,
+			f.country,
+			f.zip_code
+		FROM users u
+		JOIN fundraisers f ON f.id = u.id
+		WHERE u.role = 'fundraiser'
+			AND LOWER(u.wallet_address) = LOWER($1)
+	`
+
+	var fundraiser domain.Fundraiser
+	var imageObjectKey sql.NullString
+	var socialURL sql.NullString
+	err := r.db.QueryRowContext(ctx, query, strings.TrimSpace(walletAddress)).Scan(
+		&fundraiser.ID,
+		&fundraiser.Role,
+		&fundraiser.Email,
+		&fundraiser.WalletAddress,
+		&fundraiser.CreatedAt,
+		&fundraiser.Name,
+		&imageObjectKey,
+		&fundraiser.ContactName,
+		&fundraiser.ContactPhone,
+		&socialURL,
+		&fundraiser.Country,
+		&fundraiser.ZipCode,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Fundraiser{}, false, nil
+		}
+		return domain.Fundraiser{}, false, fmt.Errorf("repository: find fundraiser by wallet address: %w", err)
+	}
+
+	if imageObjectKey.Valid {
+		fundraiser.ImageObjectKey = &imageObjectKey.String
+	}
+	if socialURL.Valid {
+		fundraiser.SocialURL = &socialURL.String
+	}
+
+	return fundraiser, true, nil
 }

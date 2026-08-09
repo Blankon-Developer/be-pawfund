@@ -41,5 +41,10 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		application.FundraiserHandler.HandleRegisterFundraiser,
 	)
 
+	router.With(application.Authenticate).Get(
+		"/v1/fundraiser/profile",
+		application.FundraiserHandler.HandleGetProfile,
+	)
+
 	return router
 }

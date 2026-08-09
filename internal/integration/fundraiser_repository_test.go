@@ -110,6 +110,92 @@ func TestPostgresFundraiserRepositoryCreate(t *testing.T) {
 	}
 }
 
+func TestPostgresFundraiserRepositoryFindByWalletAddress(t *testing.T) {
+	imageKey := "profiles/rescue.png"
+	const fundraiserWallet = "0xFundraiserChecksum"
+
+	tests := []struct {
+		name       string
+		prepare    func(t *testing.T)
+		address    string
+		wantFound  bool
+		wantImage  *string
+		wantSocial *string
+	}{
+		{
+			name: "finds fundraiser case-insensitively",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &imageKey))
+			},
+			address:    strings.ToLower(fundraiserWallet),
+			wantFound:  true,
+			wantImage:  &imageKey,
+			wantSocial: stringPointer("https://example.com/rescue"),
+		},
+		{
+			name: "returns nullable profile fields",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				fundraiser := newFundraiser("shelter@example.com", fundraiserWallet, nil)
+				fundraiser.SocialURL = nil
+				mustCreateFundraiser(t, repo, fundraiser)
+			},
+			address:   fundraiserWallet,
+			wantFound: true,
+		},
+		{
+			name: "does not return supporter profile",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("supporter@example.com", fundraiserWallet, nil))
+			},
+			address: fundraiserWallet,
+		},
+		{
+			name:    "returns not found for unregistered wallet",
+			address: fundraiserWallet,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			if test.prepare != nil {
+				test.prepare(t)
+			}
+
+			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			profile, found, err := repo.FindByWalletAddress(t.Context(), test.address)
+			if err != nil {
+				t.Fatalf("FindByWalletAddress() unexpected error: %v", err)
+			}
+			if found != test.wantFound {
+				t.Fatalf("found = %v, want %v", found, test.wantFound)
+			}
+			if !found {
+				return
+			}
+			if profile.Role != domain.UserRoleFundraiser || profile.WalletAddress != fundraiserWallet {
+				t.Errorf("profile identity = %#v", profile.User)
+			}
+			if profile.Name != "Animal Rescue" || profile.Email == "" || profile.CreatedAt.IsZero() {
+				t.Errorf("profile user fields = %#v", profile)
+			}
+			if profile.ContactName != "Jane Doe" || profile.ContactPhone != "+62 812 3456" || profile.Country != "Indonesia" || profile.ZipCode != "10110" {
+				t.Errorf("profile details = %#v", profile)
+			}
+			if !equalStringPointers(profile.ImageObjectKey, test.wantImage) {
+				t.Errorf("image key = %v, want %v", profile.ImageObjectKey, test.wantImage)
+			}
+			if !equalStringPointers(profile.SocialURL, test.wantSocial) {
+				t.Errorf("social URL = %v, want %v", profile.SocialURL, test.wantSocial)
+			}
+		})
+	}
+}
+
 func newFundraiser(email, wallet string, imageObjectKey *string) domain.Fundraiser {
 	socialURL := "https://example.com/rescue"
 	return domain.Fundraiser{

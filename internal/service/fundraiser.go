@@ -81,6 +81,18 @@ func (s *FundraiserService) Register(ctx context.Context, input RegisterFundrais
 	return created, nil
 }
 
+func (s *FundraiserService) GetProfile(ctx context.Context, walletAddress string) (domain.Fundraiser, error) {
+	fundraiser, found, err := s.repository.FindByWalletAddress(ctx, strings.TrimSpace(walletAddress))
+	if err != nil {
+		return domain.Fundraiser{}, fmt.Errorf("service: get fundraiser profile: %w", err)
+	}
+	if !found {
+		return domain.Fundraiser{}, ErrProfileNotFound
+	}
+
+	return fundraiser, nil
+}
+
 func normalizeOptionalString(value *string) *string {
 	if value == nil {
 		return nil
