@@ -34,6 +34,10 @@ func ReadJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) e
 	}
 
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return fmt.Errorf("%w: limit is %d bytes", ErrBodyTooLarge, maxBytesError.Limit)
+		}
 		if err == nil {
 			return fmt.Errorf("%w: request body must contain one JSON object", ErrInvalidJSON)
 		}

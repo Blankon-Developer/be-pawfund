@@ -33,6 +33,10 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 
 	router.With(application.Authenticate).Get("/v1/auth/me", application.AuthHandler.HandleGetMe)
 	router.With(application.Authenticate).Post(
+		"/v1/uploads/profile-image/presign",
+		application.UploadHandler.HandlePresignProfileImage,
+	)
+	router.With(application.Authenticate).Post(
 		"/v1/register/supporter",
 		application.SupporterHandler.HandleRegisterSupporter,
 	)
@@ -45,7 +49,6 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		"/v1/supporter/profile",
 		application.SupporterHandler.HandleGetProfile,
 	)
-
 	router.With(application.Authenticate).Get(
 		"/v1/fundraiser/profile",
 		application.FundraiserHandler.HandleGetProfile,

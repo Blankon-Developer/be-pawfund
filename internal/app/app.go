@@ -23,6 +23,7 @@ type Application struct {
 	DB                *sql.DB
 	Cache             *cache.CacheClient
 	AuthHandler       *api.AuthHandler
+	UploadHandler     *api.UploadHandler
 	SupporterHandler  *api.SupporterHandler
 	FundraiserHandler *api.FundraiserHandler
 	Authenticate      func(http.Handler) http.Handler
@@ -57,6 +58,17 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize public URL builder: %w", err))
 	}
+	putPresigner, err := storage.NewPutPresigner(storage.PresignerConfig{
+		Endpoint:  cfg.StorageEndpoint,
+		AccessKey: cfg.StorageAccessKey,
+		SecretKey: cfg.StorageSecretKey,
+		Bucket:    cfg.StorageBucket,
+		Region:    cfg.StorageRegion,
+		TTL:       cfg.StoragePresignTTL,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("app: initialize storage presigner: %w", err))
+	}
 
 	cacheClient, err = cache.Open(ctx, cache.Config{URL: cfg.CacheURL, KeyPrefix: cfg.CacheKeyPrefix})
 	if err != nil {
@@ -81,15 +93,18 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 			AccessTokenTTL: cfg.JWTTTL,
 		},
 	)
+	uploadService := service.NewUploadService(putPresigner, uuid.NewV7)
 
 	supporterHandler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
 	fundraiserHandler := api.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
 	authHandler := api.NewAuthHandler(authService, urlBuilder, logger)
+	uploadHandler := api.NewUploadHandler(uploadService, logger)
 
 	return &Application{
 		DB:                db,
 		Cache:             cacheClient,
 		AuthHandler:       authHandler,
+		UploadHandler:     uploadHandler,
 		SupporterHandler:  supporterHandler,
 		FundraiserHandler: fundraiserHandler,
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
