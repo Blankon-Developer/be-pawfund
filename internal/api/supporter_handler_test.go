@@ -20,9 +20,13 @@ import (
 )
 
 type stubSupporterRegistrar struct {
-	err    error
-	called int
-	input  service.RegisterSupporterInput
+	err               error
+	called            int
+	input             service.RegisterSupporterInput
+	profile           domain.Supporter
+	getProfileErr     error
+	getProfileCalls   int
+	getProfileAddress string
 }
 
 func (s *stubSupporterRegistrar) Register(
@@ -43,6 +47,18 @@ func (s *stubSupporterRegistrar) Register(
 		Name:           input.Name,
 		ImageObjectKey: input.ImageObjectKey,
 	}, nil
+}
+
+func (s *stubSupporterRegistrar) GetProfile(
+	_ context.Context,
+	walletAddress string,
+) (domain.Supporter, error) {
+	s.getProfileCalls++
+	s.getProfileAddress = walletAddress
+	if s.getProfileErr != nil {
+		return domain.Supporter{}, s.getProfileErr
+	}
+	return s.profile, nil
 }
 
 type decodedResponse struct {
@@ -220,6 +236,149 @@ func TestHandleRegisterSupporter(t *testing.T) {
 				if strings.Contains(string(decoded.Data), "wallet_address") || !strings.Contains(string(decoded.Data), "walletAddress") {
 					t.Errorf("response does not use camelCase: %s", decoded.Data)
 				}
+			}
+		})
+	}
+}
+
+func TestHandleGetSupporterProfile(t *testing.T) {
+	imageKey := "profiles/cat photo.png"
+	profile := domain.Supporter{
+		User: domain.User{
+			Role:          domain.UserRoleSupporter,
+			Email:         "cat@example.com",
+			WalletAddress: "0xWalletChecksum",
+		},
+		Name:           "Cat Lover",
+		ImageObjectKey: &imageKey,
+	}
+	profileWithoutImage := profile
+	profileWithoutImage.ImageObjectKey = nil
+	unexpectedFailure := errors.New("unexpected failure")
+
+	tests := []struct {
+		name             string
+		principal        *auth.Principal
+		profile          domain.Supporter
+		serviceError     error
+		wantHTTP         int
+		wantCode         string
+		wantServiceCalls int
+		wantAddress      string
+		wantImageURL     *string
+	}{
+		{
+			name:             "returns authenticated supporter profile",
+			principal:        &auth.Principal{WalletAddress: " 0xWalletChecksum "},
+			profile:          profile,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+			wantImageURL:     stringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
+		},
+		{
+			name:             "returns null image when omitted",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			profile:          profileWithoutImage,
+			wantHTTP:         http.StatusOK,
+			wantCode:         "PROFILE_RETRIEVED",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+		{
+			name:     "requires authenticated principal",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:      "rejects blank wallet claim",
+			principal: &auth.Principal{WalletAddress: " "},
+			wantHTTP:  http.StatusUnauthorized,
+			wantCode:  "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:             "maps missing supporter profile",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			serviceError:     service.ErrProfileNotFound,
+			wantHTTP:         http.StatusNotFound,
+			wantCode:         "PROFILE_NOT_FOUND",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+		{
+			name:             "hides unexpected service error",
+			principal:        &auth.Principal{WalletAddress: "0xWalletChecksum"},
+			serviceError:     unexpectedFailure,
+			wantHTTP:         http.StatusInternalServerError,
+			wantCode:         "INTERNAL_SERVER_ERROR",
+			wantServiceCalls: 1,
+			wantAddress:      "0xWalletChecksum",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &stubSupporterRegistrar{
+				profile:       test.profile,
+				getProfileErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			handler := NewSupporterHandler(serviceStub, urlBuilder, logger)
+			request := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetProfile(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf(
+					"status/code = %d/%q, want %d/%q; body: %s",
+					response.Code,
+					decoded.Code,
+					test.wantHTTP,
+					test.wantCode,
+					response.Body.String(),
+				)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusUnauthorized && response.Header().Get("WWW-Authenticate") != "Bearer" {
+				t.Errorf("WWW-Authenticate = %q", response.Header().Get("WWW-Authenticate"))
+			}
+			if serviceStub.getProfileCalls != test.wantServiceCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.getProfileCalls, test.wantServiceCalls)
+			}
+			if serviceStub.getProfileAddress != test.wantAddress {
+				t.Errorf("service address = %q, want %q", serviceStub.getProfileAddress, test.wantAddress)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			var data getSupporterProfileResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode profile data: %v", err)
+			}
+			if data.Name != test.profile.Name || data.Email != test.profile.Email || data.WalletAddress != test.profile.WalletAddress {
+				t.Errorf("profile identity = %#v", data)
+			}
+			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
+				t.Errorf("image URL = %v, want %v", pointerValue(data.ImageURL), pointerValue(test.wantImageURL))
+			}
+			if strings.Contains(string(decoded.Data), "imageObjectKey") || strings.Contains(string(decoded.Data), `"role"`) {
+				t.Errorf("response leaks internal fields: %s", decoded.Data)
 			}
 		})
 	}

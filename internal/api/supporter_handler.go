@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
@@ -17,6 +18,7 @@ const maxRegisterSupporterBodyBytes = 1 << 20
 
 type SupporterService interface {
 	Register(ctx context.Context, input service.RegisterSupporterInput) (domain.Supporter, error)
+	GetProfile(ctx context.Context, walletAddress string) (domain.Supporter, error)
 }
 
 type SupporterHandler struct {
@@ -81,6 +83,50 @@ func (h *SupporterHandler) HandleRegisterSupporter(w http.ResponseWriter, r *htt
 		Role:          created.Role,
 	}
 	h.Success(w, http.StatusCreated, "SUPPORTER_REGISTERED", "Supporter account created successfully.", response)
+}
+
+func (h *SupporterHandler) HandleGetProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	supporter, err := h.service.GetProfile(r.Context(), walletAddress)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No supporter profile is registered for the authenticated wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get supporter profile", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := getSupporterProfileResponse{
+		Name:          supporter.Name,
+		Email:         supporter.Email,
+		WalletAddress: supporter.WalletAddress,
+		ImageURL:      h.urlBuilder.Build(supporter.ImageObjectKey),
+	}
+	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
 }
 
 func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) {

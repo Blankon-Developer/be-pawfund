@@ -14,4 +14,5 @@ var (
 
 type SupporterRepository interface {
 	Create(ctx context.Context, supporter domain.Supporter) (domain.Supporter, error)
+	FindByWalletAddress(ctx context.Context, walletAddress string) (domain.Supporter, bool, error)
 }

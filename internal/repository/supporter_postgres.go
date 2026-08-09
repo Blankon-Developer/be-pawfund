@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -65,6 +66,50 @@ func (r *PostgresSupporterRepository) Create(ctx context.Context, supporter doma
 	}
 
 	return supporter, nil
+}
+
+func (r *PostgresSupporterRepository) FindByWalletAddress(
+	ctx context.Context,
+	walletAddress string,
+) (domain.Supporter, bool, error) {
+	const query = `
+		SELECT
+			u.id,
+			u.role,
+			u.email,
+			u.wallet_address,
+			u.created_at,
+			s.name,
+			s.image_object_key
+		FROM users u
+		JOIN supporters s ON s.id = u.id
+		WHERE u.role = 'supporter'
+			AND LOWER(u.wallet_address) = LOWER($1)
+	`
+
+	var supporter domain.Supporter
+	var imageObjectKey sql.NullString
+	err := r.db.QueryRowContext(ctx, query, strings.TrimSpace(walletAddress)).Scan(
+		&supporter.ID,
+		&supporter.Role,
+		&supporter.Email,
+		&supporter.WalletAddress,
+		&supporter.CreatedAt,
+		&supporter.Name,
+		&imageObjectKey,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Supporter{}, false, nil
+		}
+		return domain.Supporter{}, false, fmt.Errorf("repository: find supporter by wallet address: %w", err)
+	}
+
+	if imageObjectKey.Valid {
+		supporter.ImageObjectKey = &imageObjectKey.String
+	}
+
+	return supporter, true, nil
 }
 
 func mapPostgresError(operation string, err error) error {

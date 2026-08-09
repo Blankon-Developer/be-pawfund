@@ -110,6 +110,82 @@ func TestPostgresSupporterRepositoryCreate(t *testing.T) {
 	}
 }
 
+func TestPostgresSupporterRepositoryFindByWalletAddress(t *testing.T) {
+	imageKey := "profiles/cat.png"
+	const supporterWallet = "0xSupporterChecksum"
+
+	tests := []struct {
+		name      string
+		prepare   func(t *testing.T)
+		address   string
+		wantFound bool
+		wantImage *string
+	}{
+		{
+			name: "finds supporter case-insensitively",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("cat@example.com", supporterWallet, &imageKey))
+			},
+			address:   strings.ToLower(supporterWallet),
+			wantFound: true,
+			wantImage: &imageKey,
+		},
+		{
+			name: "returns nullable image field",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("dog@example.com", supporterWallet, nil))
+			},
+			address:   supporterWallet,
+			wantFound: true,
+		},
+		{
+			name: "does not return fundraiser profile",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", supporterWallet, nil))
+			},
+			address: supporterWallet,
+		},
+		{
+			name:    "returns not found for unregistered wallet",
+			address: supporterWallet,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			if test.prepare != nil {
+				test.prepare(t)
+			}
+
+			repo := repository.NewPostgresSupporterRepository(testDatabase)
+			profile, found, err := repo.FindByWalletAddress(t.Context(), test.address)
+			if err != nil {
+				t.Fatalf("FindByWalletAddress() unexpected error: %v", err)
+			}
+			if found != test.wantFound {
+				t.Fatalf("found = %v, want %v", found, test.wantFound)
+			}
+			if !found {
+				return
+			}
+			if profile.Role != domain.UserRoleSupporter || profile.WalletAddress != supporterWallet {
+				t.Errorf("profile identity = %#v", profile.User)
+			}
+			if profile.Name != "Supporter" || profile.Email == "" || profile.CreatedAt.IsZero() {
+				t.Errorf("profile user fields = %#v", profile)
+			}
+			if !equalStringPointers(profile.ImageObjectKey, test.wantImage) {
+				t.Errorf("image key = %v, want %v", profile.ImageObjectKey, test.wantImage)
+			}
+		})
+	}
+}
+
 func newSupporter(email, wallet string, imageObjectKey *string) domain.Supporter {
 	return domain.Supporter{
 		User: domain.User{

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,13 +13,23 @@ import (
 )
 
 type stubSupporterRepository struct {
-	create func(context.Context, domain.Supporter) (domain.Supporter, error)
-	called int
+	create     func(context.Context, domain.Supporter) (domain.Supporter, error)
+	find       func(context.Context, string) (domain.Supporter, bool, error)
+	called     int
+	findCalled int
 }
 
 func (s *stubSupporterRepository) Create(ctx context.Context, supporter domain.Supporter) (domain.Supporter, error) {
 	s.called++
 	return s.create(ctx, supporter)
+}
+
+func (s *stubSupporterRepository) FindByWalletAddress(
+	ctx context.Context,
+	walletAddress string,
+) (domain.Supporter, bool, error) {
+	s.findCalled++
+	return s.find(ctx, walletAddress)
 }
 
 func TestSupporterServiceRegister(t *testing.T) {
@@ -126,6 +137,80 @@ func TestSupporterServiceRegister(t *testing.T) {
 
 			if (repo.called > 0) != test.wantRepositoryCall {
 				t.Errorf("repository calls = %d, want called = %v", repo.called, test.wantRepositoryCall)
+			}
+		})
+	}
+}
+
+func TestSupporterServiceGetProfile(t *testing.T) {
+	profile := domain.Supporter{
+		User: domain.User{
+			Role:          domain.UserRoleSupporter,
+			Email:         "cat@example.com",
+			WalletAddress: "0xWalletChecksum",
+		},
+		Name: "Cat Lover",
+	}
+	repositoryFailure := errors.New("repository failure")
+
+	tests := []struct {
+		name        string
+		found       bool
+		repoError   error
+		wantError   error
+		wantProfile domain.Supporter
+	}{
+		{
+			name:        "returns supporter profile",
+			found:       true,
+			wantProfile: profile,
+		},
+		{
+			name:      "returns not found",
+			wantError: ErrProfileNotFound,
+		},
+		{
+			name:      "wraps repository failure",
+			repoError: repositoryFailure,
+			wantError: repositoryFailure,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			type contextKey struct{}
+			ctx := context.WithValue(context.Background(), contextKey{}, "request-context")
+			repo := &stubSupporterRepository{
+				find: func(gotCtx context.Context, walletAddress string) (domain.Supporter, bool, error) {
+					if gotCtx.Value(contextKey{}) != "request-context" {
+						t.Error("request context was not propagated")
+					}
+					if walletAddress != "0xWalletChecksum" {
+						t.Errorf("wallet address = %q", walletAddress)
+					}
+					return profile, test.found, test.repoError
+				},
+			}
+			supporterService := NewSupporterService(repo, nil)
+
+			got, err := supporterService.GetProfile(ctx, " 0xWalletChecksum ")
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("GetProfile() error = %v, want %v", err, test.wantError)
+				}
+				if test.repoError != nil && !strings.Contains(err.Error(), "get supporter profile") {
+					t.Errorf("GetProfile() error lacks operation context: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("GetProfile() unexpected error: %v", err)
+				}
+				if got != test.wantProfile {
+					t.Errorf("GetProfile() = %#v, want %#v", got, test.wantProfile)
+				}
+			}
+			if repo.findCalled != 1 {
+				t.Errorf("repository calls = %d, want 1", repo.findCalled)
 			}
 		})
 	}

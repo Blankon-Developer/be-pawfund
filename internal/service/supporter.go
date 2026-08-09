@@ -65,3 +65,15 @@ func (s *SupporterService) Register(ctx context.Context, input RegisterSupporter
 
 	return created, nil
 }
+
+func (s *SupporterService) GetProfile(ctx context.Context, walletAddress string) (domain.Supporter, error) {
+	supporter, found, err := s.repository.FindByWalletAddress(ctx, strings.TrimSpace(walletAddress))
+	if err != nil {
+		return domain.Supporter{}, fmt.Errorf("service: get supporter profile: %w", err)
+	}
+	if !found {
+		return domain.Supporter{}, ErrProfileNotFound
+	}
+
+	return supporter, nil
+}
