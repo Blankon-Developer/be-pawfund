@@ -40,7 +40,7 @@ func NewFundraiserHandler(
 }
 
 func (h *FundraiserHandler) HandleRegisterFundraiser(w http.ResponseWriter, r *http.Request) {
-	var request RegisterFundraiserRequest
+	var request registerFundraiserRequest
 	if err := httpx.ReadJSON(w, r, &request, maxRegisterFundraiserBodyBytes); err != nil {
 		h.ReadError(w, err, "Request body exceeds the 1 MiB limit.")
 		return
@@ -82,10 +82,10 @@ func (h *FundraiserHandler) HandleRegisterFundraiser(w http.ResponseWriter, r *h
 		return
 	}
 
-	response := RegisterFundraiserResponse{
+	response := registerFundraiserResponse{
 		Name:  created.Name,
 		Email: created.Email,
-		ContactPerson: FundraiserContactPerson{
+		ContactPerson: fundraiserContactPerson{
 			Name:  created.ContactName,
 			Phone: created.ContactPhone,
 		},
@@ -134,10 +134,10 @@ func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	response := GetProfileResponse{
+	response := getProfileResponse{
 		Name:  fundraiser.Name,
 		Email: fundraiser.Email,
-		ContactPerson: FundraiserContactPerson{
+		ContactPerson: fundraiserContactPerson{
 			Name:  fundraiser.ContactName,
 			Phone: fundraiser.ContactPhone,
 		},

@@ -16,22 +16,22 @@ const (
 	maxZipCodeCharacters   = 20
 )
 
-type FundraiserContactPerson struct {
+type fundraiserContactPerson struct {
 	Name  string `json:"name"`
 	Phone string `json:"phone"`
 }
 
-type RegisterFundraiserRequest struct {
+type registerFundraiserRequest struct {
 	Name           string                  `json:"name"`
 	Email          string                  `json:"email"`
-	ContactPerson  FundraiserContactPerson `json:"contactPerson"`
+	ContactPerson  fundraiserContactPerson `json:"contactPerson"`
 	SocialURL      string                  `json:"socialUrl"`
 	Country        string                  `json:"country"`
 	ZipCode        string                  `json:"zipCode"`
 	ImageObjectKey *string                 `json:"imageObjectKey"`
 }
 
-func (r *RegisterFundraiserRequest) normalize() {
+func (r *registerFundraiserRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 	r.Email = strings.ToLower(strings.TrimSpace(r.Email))
 	r.ContactPerson.Name = strings.TrimSpace(r.ContactPerson.Name)
@@ -52,7 +52,7 @@ func (r *RegisterFundraiserRequest) normalize() {
 	r.ImageObjectKey = &key
 }
 
-func (r RegisterFundraiserRequest) validate() httpx.FieldErrors {
+func (r registerFundraiserRequest) validate() httpx.FieldErrors {
 	fieldErrors := make(httpx.FieldErrors)
 
 	validateRequiredLength(fieldErrors, "name", r.Name, maxNameCharacters)
@@ -113,10 +113,10 @@ func isAbsoluteHTTPURL(rawURL string) bool {
 	return (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-type RegisterFundraiserResponse struct {
+type registerFundraiserResponse struct {
 	Name          string                  `json:"name"`
 	Email         string                  `json:"email"`
-	ContactPerson FundraiserContactPerson `json:"contactPerson"`
+	ContactPerson fundraiserContactPerson `json:"contactPerson"`
 	SocialURL     string                  `json:"socialUrl"`
 	Country       string                  `json:"country"`
 	ZipCode       string                  `json:"zipCode"`
@@ -125,10 +125,10 @@ type RegisterFundraiserResponse struct {
 	Role          domain.UserRole         `json:"role"`
 }
 
-type GetProfileResponse struct {
+type getProfileResponse struct {
 	Name          string                  `json:"name"`
 	Email         string                  `json:"email"`
-	ContactPerson FundraiserContactPerson `json:"contactPerson"`
+	ContactPerson fundraiserContactPerson `json:"contactPerson"`
 	SocialURL     string                  `json:"socialUrl"`
 	Country       string                  `json:"country"`
 	ZipCode       string                  `json:"zipCode"`

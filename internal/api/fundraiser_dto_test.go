@@ -10,10 +10,10 @@ import (
 
 func TestRegisterFundraiserRequestNormalize(t *testing.T) {
 	imageKey := " profiles/rescue.png "
-	request := RegisterFundraiserRequest{
+	request := registerFundraiserRequest{
 		Name:  " Animal Rescue ",
 		Email: " RESCUE@EXAMPLE.COM ",
-		ContactPerson: FundraiserContactPerson{
+		ContactPerson: fundraiserContactPerson{
 			Name:  " Jane Doe ",
 			Phone: " +62 812 3456 ",
 		},
@@ -47,10 +47,10 @@ func TestRegisterFundraiserRequestNormalize(t *testing.T) {
 }
 
 func TestRegisterFundraiserRequestValidate(t *testing.T) {
-	valid := RegisterFundraiserRequest{
+	valid := registerFundraiserRequest{
 		Name:  "Animal Rescue",
 		Email: "rescue@example.com",
-		ContactPerson: FundraiserContactPerson{
+		ContactPerson: fundraiserContactPerson{
 			Name:  "Jane Doe",
 			Phone: "+62 812 3456",
 		},
@@ -61,13 +61,13 @@ func TestRegisterFundraiserRequestValidate(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		request    RegisterFundraiserRequest
+		request    registerFundraiserRequest
 		wantErrors httpx.FieldErrors
 	}{
 		{name: "accepts valid request", request: valid},
 		{
 			name:    "returns every required field error",
-			request: RegisterFundraiserRequest{},
+			request: registerFundraiserRequest{},
 			wantErrors: httpx.FieldErrors{
 				"name":                {"name is required!"},
 				"email":               {"email is required!"},
@@ -80,10 +80,10 @@ func TestRegisterFundraiserRequestValidate(t *testing.T) {
 		},
 		{
 			name: "validates formats and schema limits",
-			request: RegisterFundraiserRequest{
+			request: registerFundraiserRequest{
 				Name:  strings.Repeat("n", 256),
 				Email: strings.Repeat("e", 256),
-				ContactPerson: FundraiserContactPerson{
+				ContactPerson: fundraiserContactPerson{
 					Name:  strings.Repeat("n", 256),
 					Phone: strings.Repeat("p", 256),
 				},
@@ -108,7 +108,7 @@ func TestRegisterFundraiserRequestValidate(t *testing.T) {
 		},
 		{
 			name: "rejects relative social URL",
-			request: func() RegisterFundraiserRequest {
+			request: func() registerFundraiserRequest {
 				request := valid
 				request.SocialURL = "/rescue"
 				return request
@@ -119,7 +119,7 @@ func TestRegisterFundraiserRequestValidate(t *testing.T) {
 		},
 		{
 			name: "rejects social URL over length limit",
-			request: func() RegisterFundraiserRequest {
+			request: func() registerFundraiserRequest {
 				request := valid
 				request.SocialURL = "https://example.com/" + strings.Repeat("x", 2029)
 				return request

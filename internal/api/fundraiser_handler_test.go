@@ -242,7 +242,7 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 			}
 
 			if test.wantHTTP == http.StatusCreated {
-				var data RegisterFundraiserResponse
+				var data registerFundraiserResponse
 				if err := json.Unmarshal(decoded.Data, &data); err != nil {
 					t.Fatalf("decode success data: %v", err)
 				}
@@ -398,7 +398,7 @@ func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
 				return
 			}
 
-			var data GetProfileResponse
+			var data getProfileResponse
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode profile data: %v", err)
 			}

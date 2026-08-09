@@ -130,7 +130,19 @@ func TestGetFundraiserProfileEndpoint(t *testing.T) {
 				return
 			}
 
-			var data api.GetProfileResponse
+			var data struct {
+				Name          string `json:"name"`
+				Email         string `json:"email"`
+				ContactPerson struct {
+					Name  string `json:"name"`
+					Phone string `json:"phone"`
+				} `json:"contactPerson"`
+				SocialURL     string  `json:"socialUrl"`
+				Country       string  `json:"country"`
+				ZipCode       string  `json:"zipCode"`
+				ImageURL      *string `json:"imageUrl"`
+				WalletAddress string  `json:"walletAddress"`
+			}
 			if err := json.Unmarshal(result.Data, &data); err != nil {
 				t.Fatalf("decode profile data: %v", err)
 			}
