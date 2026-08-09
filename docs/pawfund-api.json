@@ -2,10 +2,41 @@
   "openapi": "3.0.0",
   "info": { "version": "1.0.0", "title": "Pawfund API" },
   "servers": [{ "url": "https://api.pawfund.com/v1" }],
-  "tags": [],
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "Wallet-based sign-in flow: request a nonce message, verify the signed message to obtain an access token, and fetch the current authenticated session."
+    },
+    {
+      "name": "Registration",
+      "description": "Register a wallet address as a fundraiser or supporter account."
+    },
+    {
+      "name": "Fundraiser Profile",
+      "description": "View and manage a fundraiser's own profile, and look up public fundraiser profiles."
+    },
+    {
+      "name": "Fundraiser Campaigns",
+      "description": "Create and manage campaigns owned by the authenticated fundraiser."
+    },
+    {
+      "name": "Supporter Profile",
+      "description": "View and manage a supporter's own profile and donation history."
+    },
+    {
+      "name": "Public Campaigns",
+      "description": "Browse public campaigns and see who has donated to them."
+    },
+    {
+      "name": "File Uploads",
+      "description": "Generate presigned URLs for uploading images to storage."
+    }
+  ],
   "paths": {
     "/register/fundraiser": {
       "post": {
+        "tags": ["Registration"],
+        "summary": "Register Fundraiser",
         "responses": {
           "200": {
             "description": "Success",
@@ -128,7 +159,6 @@
           }
         },
         "parameters": [],
-        "summary": "Register Fundraiser",
         "requestBody": {
           "content": {
             "application/json": {
@@ -168,6 +198,8 @@
     },
     "/auth/me": {
       "get": {
+        "tags": ["Authentication"],
+        "summary": "Get Current User",
         "responses": {
           "200": {
             "description": "Success",
@@ -231,12 +263,13 @@
             "required": true
           }
         ],
-        "summary": "Get Me",
         "operationId": "get_auth-me"
       }
     },
     "/fundraiser/profile": {
       "get": {
+        "tags": ["Fundraiser Profile"],
+        "summary": "Get My Fundraiser Profile",
         "responses": {
           "200": {
             "description": "",
@@ -292,10 +325,11 @@
             "required": true
           }
         ],
-        "summary": "My Profile",
         "operationId": "get_fundraiser-profile"
       },
       "patch": {
+        "tags": ["Fundraiser Profile"],
+        "summary": "Update My Fundraiser Profile",
         "responses": { "200": { "description": "" } },
         "parameters": [
           {
@@ -305,7 +339,6 @@
             "required": true
           }
         ],
-        "summary": "Edit Profile",
         "requestBody": {
           "content": {
             "application/json": {
@@ -345,6 +378,8 @@
     },
     "/fundraiser/campaigns": {
       "get": {
+        "tags": ["Fundraiser Campaigns"],
+        "summary": "List My Campaigns",
         "responses": {
           "200": {
             "description": "",
@@ -423,11 +458,12 @@
             "schema": { "type": "number", "default": "10" }
           }
         ],
-        "summary": "Campaign List",
         "description": "Endpoint untuk mendapatkan list campaigns",
         "operationId": "get_campaigns-3"
       },
       "post": {
+        "tags": ["Fundraiser Campaigns"],
+        "summary": "Create Campaign",
         "responses": {
           "201": {
             "description": "",
@@ -458,7 +494,6 @@
             "required": true
           }
         ],
-        "summary": "Create Campaign",
         "operationId": "post_fundraiser-campaigns",
         "requestBody": {
           "content": {
@@ -493,6 +528,8 @@
     },
     "/campaigns": {
       "get": {
+        "tags": ["Public Campaigns"],
+        "summary": "List Campaigns",
         "responses": {
           "200": {
             "description": "",
@@ -573,13 +610,14 @@
             "schema": { "type": "number", "default": "10" }
           }
         ],
-        "summary": "Get List Campaigns",
         "description": "Endpoint untuk mendapatkan list campaigns",
         "operationId": "get_campaigns"
       }
     },
     "/fundraiser/campaigns/{address}": {
       "get": {
+        "tags": ["Fundraiser Campaigns"],
+        "summary": "Get My Campaign Detail",
         "responses": {
           "200": {
             "description": "",
@@ -642,12 +680,13 @@
             "required": true
           }
         ],
-        "summary": "Campaign Detail",
         "operationId": "get_campaigns-1-1"
       }
     },
     "/campaigns/{address}": {
       "get": {
+        "tags": ["Public Campaigns"],
+        "summary": "Get Campaign Detail",
         "responses": {
           "200": {
             "description": "",
@@ -722,12 +761,13 @@
             "required": true
           }
         ],
-        "summary": "Get Campaign by Address",
         "operationId": "get_campaigns-1"
       }
     },
     "/campaigns/{address}/donors": {
       "get": {
+        "tags": ["Public Campaigns"],
+        "summary": "List Campaign Donors",
         "responses": {
           "200": {
             "description": "",
@@ -782,13 +822,14 @@
             "required": true
           }
         ],
-        "summary": "Get Campaign Donors by Address",
         "operationId": "get_campaigns-2",
         "description": "To get a list of everyone who donated to this campaign"
       }
     },
     "/fundraiser/{address}": {
       "get": {
+        "tags": ["Fundraiser Profile"],
+        "summary": "Get Public Fundraiser Profile",
         "responses": {
           "200": {
             "description": "",
@@ -844,13 +885,14 @@
             "required": true
           }
         ],
-        "summary": "Public Fundraiser Profile",
         "description": "Mendapatkan detail fundraiser untuk publik",
         "operationId": "get_fundraiser-address"
       }
     },
     "/supporter/profile": {
       "get": {
+        "tags": ["Supporter Profile"],
+        "summary": "Get My Supporter Profile",
         "responses": {
           "200": {
             "description": "",
@@ -886,10 +928,11 @@
             "required": true
           }
         ],
-        "summary": "My Profile",
         "operationId": "get_supporter-profile"
       },
       "patch": {
+        "tags": ["Supporter Profile"],
+        "summary": "Update My Supporter Profile",
         "responses": { "200": { "description": "" } },
         "parameters": [
           {
@@ -899,7 +942,6 @@
             "required": true
           }
         ],
-        "summary": "Edit Profile",
         "requestBody": {
           "content": {
             "application/json": {
@@ -920,6 +962,8 @@
     },
     "/supporter/donations": {
       "get": {
+        "tags": ["Supporter Profile"],
+        "summary": "List My Donations",
         "responses": {
           "200": {
             "description": "",
@@ -970,12 +1014,13 @@
             "required": true
           }
         ],
-        "summary": "My Donation",
         "operationId": "get_supporter-donations"
       }
     },
     "/fundraiser/campaigns/presign": {
       "get": {
+        "tags": ["Fundraiser Campaigns"],
+        "summary": "Presign Campaign Image Upload",
         "responses": {
           "200": {
             "description": "",
@@ -1009,12 +1054,12 @@
             "required": true
           }
         ],
-        "summary": "Presign Campaign Image",
         "operationId": "get_campaigns-4"
       }
     },
     "/uploads/profile-image/presign": {
       "post": {
+        "tags": ["File Uploads"],
         "summary": "Presign Profile Image Upload",
         "description": "Generate a presigned URL to upload a profile image for a fundraiser or supporter account. Available to any authenticated wallet, including wallets that have not registered a profile yet. Replaces the previous per-role presign endpoints (/fundraiser/profile/presign, /supporter/presign, /register/presign).",
         "responses": {
@@ -1132,6 +1177,8 @@
     },
     "/fundraiser/profile/{address}/delete": {
       "delete": {
+        "tags": ["Fundraiser Profile"],
+        "summary": "Delete Fundraiser Profile",
         "responses": { "200": { "description": "" } },
         "parameters": [
           {
@@ -1147,12 +1194,13 @@
             "required": true
           }
         ],
-        "summary": "Delete Profile",
         "operationId": "delete_fundraiser-profile-address-delete"
       }
     },
     "/supporter/profile/{address}/delete": {
       "delete": {
+        "tags": ["Supporter Profile"],
+        "summary": "Delete Supporter Profile",
         "responses": { "200": { "description": "" } },
         "parameters": [
           {
@@ -1168,12 +1216,13 @@
             "required": true
           }
         ],
-        "summary": "Delete Profile",
         "operationId": "delete_supporter-profile-address-delete"
       }
     },
     "/register/supporter": {
       "post": {
+        "tags": ["Registration"],
+        "summary": "Register Supporter",
         "responses": {
           "200": {
             "description": "Success",
@@ -1253,7 +1302,6 @@
             "description": "Access token yang didapat setelah `Get Challenge` dan `Verify Signature`"
           }
         ],
-        "summary": "Register Supporter",
         "operationId": "post_register-supporter",
         "requestBody": {
           "content": {
@@ -1275,6 +1323,7 @@
     },
     "/auth/verify": {
       "post": {
+        "tags": ["Authentication"],
         "summary": "Verify Signature",
         "description": "Sign message dari challenge yang telah didapat untuk mendapatkan access token",
         "responses": {
@@ -1391,7 +1440,8 @@
     },
     "/auth/message": {
       "post": {
-        "summary": "Get Message",
+        "tags": ["Authentication"],
+        "summary": "Request Sign-In Message",
         "description": "Request nonce untuk nantinya digunakan saat sign.",
         "responses": {
           "200": {
