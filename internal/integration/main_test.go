@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,15 +14,23 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pressly/goose/v3"
 	"github.com/redis/go-redis/v9"
 )
 
 var (
-	testDatabase    *sql.DB
-	testCache       *redis.Client
-	testDatabaseURL string
-	testCacheURL    string
+	testDatabase         *sql.DB
+	testCache            *redis.Client
+	testDatabaseURL      string
+	testCacheURL         string
+	testStorageEndpoint  string
+	testStorageAccessKey string
+	testStorageSecretKey string
+	testStorageBucket    string
+	testStorageRegion    string
+	testStorageClient    *minio.Client
 )
 
 func TestMain(m *testing.M) {
@@ -33,6 +42,15 @@ func TestMain(m *testing.M) {
 	testCacheURL = os.Getenv("TEST_CACHE_URL")
 	if testCacheURL == "" {
 		fmt.Fprintln(os.Stderr, "TEST_CACHE_URL is required for integration tests")
+		os.Exit(1)
+	}
+	testStorageEndpoint = os.Getenv("TEST_STORAGE_ENDPOINT")
+	testStorageAccessKey = os.Getenv("TEST_STORAGE_ACCESS_KEY")
+	testStorageSecretKey = os.Getenv("TEST_STORAGE_SECRET_KEY")
+	testStorageBucket = os.Getenv("TEST_STORAGE_BUCKET")
+	testStorageRegion = os.Getenv("TEST_STORAGE_REGION")
+	if testStorageEndpoint == "" || testStorageAccessKey == "" || testStorageSecretKey == "" || testStorageBucket == "" || testStorageRegion == "" {
+		fmt.Fprintln(os.Stderr, "TEST_STORAGE_ENDPOINT, TEST_STORAGE_ACCESS_KEY, TEST_STORAGE_SECRET_KEY, TEST_STORAGE_BUCKET, and TEST_STORAGE_REGION are required for integration tests")
 		os.Exit(1)
 	}
 
@@ -61,6 +79,50 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	storageEndpointURL, err := url.Parse(testStorageEndpoint)
+	if err != nil || storageEndpointURL.Host == "" {
+		_ = redisClient.Close()
+		_ = db.Close()
+		fmt.Fprintf(os.Stderr, "parse test storage endpoint: %v\n", err)
+		os.Exit(1)
+	}
+	storageClient, err := minio.New(storageEndpointURL.Host, &minio.Options{
+		Creds:  credentials.NewStaticV4(testStorageAccessKey, testStorageSecretKey, ""),
+		Secure: storageEndpointURL.Scheme == "https",
+		Region: testStorageRegion,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		_ = db.Close()
+		fmt.Fprintf(os.Stderr, "create test storage client: %v\n", err)
+		os.Exit(1)
+	}
+	if err := waitForStorage(storageClient, 15*time.Second); err != nil {
+		_ = redisClient.Close()
+		_ = db.Close()
+		fmt.Fprintf(os.Stderr, "wait for test storage: %v\n", err)
+		os.Exit(1)
+	}
+	exists, err := storageClient.BucketExists(context.Background(), testStorageBucket)
+	if err != nil {
+		_ = redisClient.Close()
+		_ = db.Close()
+		fmt.Fprintf(os.Stderr, "check test storage bucket: %v\n", err)
+		os.Exit(1)
+	}
+	if !exists {
+		if err := storageClient.MakeBucket(
+			context.Background(),
+			testStorageBucket,
+			minio.MakeBucketOptions{Region: testStorageRegion},
+		); err != nil {
+			_ = redisClient.Close()
+			_ = db.Close()
+			fmt.Fprintf(os.Stderr, "create test storage bucket: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect("postgres"); err != nil {
 		_ = redisClient.Close()
@@ -77,6 +139,7 @@ func TestMain(m *testing.M) {
 
 	testDatabase = db
 	testCache = redisClient
+	testStorageClient = storageClient
 	if err := testCache.FlushDB(context.Background()).Err(); err != nil {
 		_ = testCache.Close()
 		_ = testDatabase.Close()
@@ -103,6 +166,29 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(code)
+}
+
+func waitForStorage(client *minio.Client, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastError error
+	for {
+		if _, err := client.ListBuckets(ctx); err == nil {
+			return nil
+		} else {
+			lastError = err
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: last storage error: %v", ctx.Err(), lastError)
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitForCache(client *redis.Client, timeout time.Duration) error {
