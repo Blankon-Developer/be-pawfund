@@ -28,41 +28,24 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		}
 	})
 
-	router.Post("/v1/auth/message", application.AuthHandler.HandleCreateMessage)
-	router.Post("/v1/auth/verify", application.AuthHandler.HandleVerify)
+	router.Route("/v1", func(r chi.Router) {
+		r.Post("/auth/message", application.AuthHandler.HandleCreateMessage)
+		r.Post("/auth/verify", application.AuthHandler.HandleVerify)
+		r.Get("/fundraiser/{address}", application.FundraiserHandler.HandleGetPublicProfile)
 
-	router.With(application.Authenticate).Get("/v1/auth/me", application.AuthHandler.HandleGetMe)
-	router.With(application.Authenticate).Post(
-		"/v1/uploads/profile-image/presign",
-		application.UploadHandler.HandlePresignProfileImage,
-	)
-	router.With(application.Authenticate).Post(
-		"/v1/register/supporter",
-		application.SupporterHandler.HandleRegisterSupporter,
-	)
-	router.With(application.Authenticate).Post(
-		"/v1/register/fundraiser",
-		application.FundraiserHandler.HandleRegisterFundraiser,
-	)
+		r.Group(func(r chi.Router) {
+			r.Use(application.Authenticate)
 
-	router.With(application.Authenticate).Get(
-		"/v1/supporter/profile",
-		application.SupporterHandler.HandleGetProfile,
-	)
-
-	router.Get("/v1/fundraiser/{address}", application.FundraiserHandler.HandleGetPublicProfile)
-	router.With(application.Authenticate).Put(
-		"/v1/fundraiser/profile",
-		application.FundraiserHandler.HandleReplaceProfile,
-	)
-	router.With(application.Authenticate).Get(
-		"/v1/fundraiser/profile",
-		application.FundraiserHandler.HandleGetProfile,
-	)
-	router.With(application.Authenticate).Delete(
-		"/v1/fundraiser/profile",
-		application.FundraiserHandler.HandleDeleteProfile,
-	)
+			r.Get("/auth/me", application.AuthHandler.HandleGetMe)
+			r.Post("/uploads/profile-image/presign", application.UploadHandler.HandlePresignProfileImage)
+			r.Post("/register/supporter", application.SupporterHandler.HandleRegisterSupporter)
+			r.Post("/register/fundraiser", application.FundraiserHandler.HandleRegisterFundraiser)
+			r.Get("/supporter/profile", application.SupporterHandler.HandleGetProfile)
+			r.Get("/fundraiser/profile", application.FundraiserHandler.HandleGetProfile)
+			r.Put("/fundraiser/profile", application.FundraiserHandler.HandleReplaceProfile)
+			r.Delete("/fundraiser/profile", application.FundraiserHandler.HandleDeleteProfile)
+		})
+	})
 
 	return router
 }
