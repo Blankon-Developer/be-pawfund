@@ -309,57 +309,54 @@
       "get": {
         "tags": ["Authentication"],
         "summary": "Get Current User",
+        "security": [{ "BearerAuth": [] }],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "Authenticated profile retrieved successfully.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string", "default": "SUCCESS" },
-                    "message": {
-                      "type": "string",
-                      "default": "User data was successfully retrieved."
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "address": {
-                          "type": "string",
-                          "default": "0xA7Dd557C3628e35D4CC9618F13Aa94D57FDb7E7C"
-                        },
-                        "name": {
-                          "type": "string",
-                          "default": "John Animal Shelter"
-                        },
-                        "role": {
-                          "type": "string",
-                          "enum": ["SUPPORTER", "FUNDRAISER"],
-                          "default": "FUNDRAISER"
-                        },
-                        "imageUrl": { "type": "string" }
-                      },
-                      "required": ["address"]
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthMeSuccessResponse" }
               }
             }
           },
           "401": {
-            "description": "Unauthorized",
+            "description": "A Bearer access token is missing, malformed, invalid, or expired.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" },
+              "WWW-Authenticate": { "$ref": "#/components/headers/BearerAuthentication" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string", "default": "UNAUTHORIZED" },
-                    "message": { "type": "string" }
-                  },
-                  "required": ["code"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthAccessTokenError" }
+              }
+            }
+          },
+          "404": {
+            "description": "No profile is registered for the authenticated wallet.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthProfileNotFoundError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while retrieving the authenticated profile.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
@@ -369,7 +366,8 @@
             "in": "header",
             "name": "Authorization",
             "schema": { "type": "string", "default": "Bearer {token}" },
-            "required": true
+            "required": true,
+            "description": "Bearer access token obtained after verifying a SIWE signature."
           }
         ],
         "operationId": "get_auth-me"
@@ -1562,109 +1560,102 @@
       "post": {
         "tags": ["Authentication"],
         "summary": "Verify Signature",
-        "description": "Sign message dari challenge yang telah didapat untuk mendapatkan access token",
+        "security": [],
+        "description": "Verify a signed SIWE challenge and issue an access token.",
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "Wallet signature verified successfully.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string", "default": "SUCCESS" },
-                    "message": { "type": "string" },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "accessToken": { "type": "string" },
-                        "name": { "type": "string", "default": "John Doe" },
-                        "role": {
-                          "type": "string",
-                          "enum": ["SUPPORTER", "FUNDRAISER"],
-                          "default": "SUPPORTER"
-                        },
-                        "address": {
-                          "type": "string",
-                          "default": "0xA7Dd557C3628e35D4CC9618F13Aa94D57FDb7E7C"
-                        },
-                        "imageUrl": {
-                          "type": "string",
-                          "default": "https://pawfund.com/image/0xA7Dd557C3628e35D4CC9618F13Aa94D57FDb7E7C.png"
-                        },
-                        "isNotRegistered": { "type": "boolean" }
-                      },
-                      "required": [
-                        "accessToken",
-                        "imageUrl",
-                        "address",
-                        "role",
-                        "name",
-                        "isNotRegistered"
-                      ]
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthVerifySuccessResponse" }
               }
             }
           },
           "400": {
-            "description": "Bad Request",
+            "description": "The request body is malformed, contains unknown fields, or is not a single JSON object.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" }
-                  },
-                  "required": ["code", "message"]
-                }
+                "schema": { "$ref": "#/components/schemas/InvalidRequestError" }
+              }
+            }
+          },
+          "401": {
+            "description": "The SIWE message or signature is invalid, expired, unavailable, or has already been used.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SIWEVerificationError" }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body exceeds the 16 KiB limit.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestTooLargeError" }
+              }
+            }
+          },
+          "415": {
+            "description": "The request Content-Type is not application/json.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UnsupportedMediaTypeError" }
               }
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "The message or signature is missing or invalid.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
-                    "errors": {
-                      "type": "object",
-                      "properties": {
-                        "signature": {
-                          "type": "array",
-                          "items": { "type": "string" }
-                        },
-                        "address": {
-                          "type": "array",
-                          "items": { "type": "string" }
-                        }
-                      }
-                    }
-                  },
-                  "required": ["code", "message"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthVerifyValidationError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while verifying the SIWE message.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
         },
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "signature": {
                     "type": "string",
-                    "description": "Hex hasil sign dari challenge yang didapat"
+                    "description": "0x-prefixed, 65-byte Ethereum signature of the SIWE message."
                   },
                   "message": {
                     "type": "string",
-                    "description": "string message given by backend"
+                    "description": "The exact SIWE message returned by POST /auth/message."
                   }
                 },
                 "required": ["signature", "message"]
@@ -1679,85 +1670,87 @@
       "post": {
         "tags": ["Authentication"],
         "summary": "Request Sign-In Message",
-        "description": "Request nonce untuk nantinya digunakan saat sign.",
+        "security": [],
+        "description": "Create a one-time SIWE challenge message for a wallet address.",
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "Authentication message created successfully.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string", "default": "SUCCESS" },
-                    "message": {
-                      "type": "string",
-                      "default": "Challenge nonce has been successfully created."
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "message": {
-                          "type": "string",
-                          "default": "ovnsdMVfiiEZNSo9deAaueq2JcpE0F1lFazb7S43ORUv7y4UpDbZqGgDKxdEKr0SfWkCSIhRVsElTeK7 MR14NijAAS"
-                        }
-                      },
-                      "required": ["message"]
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthMessageSuccessResponse" }
               }
             }
           },
           "400": {
-            "description": "Bad Request",
+            "description": "The request body is malformed, contains unknown fields, or is not a single JSON object.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string", "default": "BAD_REQUEST" },
-                    "message": { "type": "string" }
-                  },
-                  "required": ["code", "message"]
-                }
+                "schema": { "$ref": "#/components/schemas/InvalidRequestError" }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body exceeds the 16 KiB limit.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RequestTooLargeError" }
+              }
+            }
+          },
+          "415": {
+            "description": "The request Content-Type is not application/json.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UnsupportedMediaTypeError" }
               }
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "The address is missing or is not a valid Ethereum address.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
-                    "errors": {
-                      "type": "object",
-                      "properties": {
-                        "address": {
-                          "type": "array",
-                          "items": { "type": "string" }
-                        }
-                      }
-                    }
-                  },
-                  "required": ["code", "message"]
-                }
+                "schema": { "$ref": "#/components/schemas/AuthMessageValidationError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while creating the authentication message.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
         },
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "address": {
                     "type": "string",
-                    "description": "public address wallet EVM"
+                    "description": "EVM wallet address for which to create the SIWE challenge."
                   }
                 },
                 "required": ["address"]
@@ -1769,6 +1762,230 @@
       }
     }
   },
-  "components": { "securitySchemes": {} },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "headers": {
+      "NoStoreCacheControl": {
+        "description": "Authentication responses must not be stored by caches.",
+        "schema": { "type": "string", "enum": ["no-store"] }
+      },
+      "AuthorizationVary": {
+        "description": "The response varies by the Authorization request header.",
+        "schema": { "type": "string", "enum": ["Authorization"] }
+      },
+      "BearerAuthentication": {
+        "description": "Authentication scheme required by this endpoint.",
+        "schema": { "type": "string", "enum": ["Bearer"] }
+      }
+    },
+    "schemas": {
+      "AuthErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["error"] },
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "data": { "type": "object", "nullable": true },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "InvalidRequestError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["INVALID_REQUEST"] },
+              "message": { "type": "string", "default": "Request body must contain one valid JSON object." }
+            }
+          }
+        ]
+      },
+      "RequestTooLargeError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["REQUEST_TOO_LARGE"] },
+              "message": { "type": "string", "default": "Request body exceeds the 16 KiB limit." }
+            }
+          }
+        ]
+      },
+      "UnsupportedMediaTypeError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["UNSUPPORTED_MEDIA_TYPE"] },
+              "message": { "type": "string", "default": "Content-Type must be application/json." }
+            }
+          }
+        ]
+      },
+      "InternalServerError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["INTERNAL_SERVER_ERROR"] },
+              "message": { "type": "string", "default": "An internal server error occurred." }
+            }
+          }
+        ]
+      },
+      "SIWEVerificationError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["SIWE_VERIFICATION_FAILED"] },
+              "message": { "type": "string", "default": "The SIWE message or signature is invalid or expired." }
+            }
+          }
+        ]
+      },
+      "AuthAccessTokenError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["ACCESS_TOKEN_REQUIRED", "INVALID_ACCESS_TOKEN"] }
+            }
+          }
+        ]
+      },
+      "AuthProfileNotFoundError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["PROFILE_NOT_FOUND"] },
+              "message": { "type": "string", "default": "No profile is registered for the authenticated wallet." }
+            }
+          }
+        ]
+      },
+      "AuthMessageValidationError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+              "message": { "type": "string", "default": "One or more fields are invalid." },
+              "errors": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "address": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["address"]
+              }
+            }
+          }
+        ]
+      },
+      "AuthVerifyValidationError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+              "message": { "type": "string", "default": "One or more fields are invalid." },
+              "errors": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "message": { "type": "array", "items": { "type": "string" } },
+                  "signature": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "AuthMessageSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["AUTH_MESSAGE_CREATED"] },
+          "message": { "type": "string", "default": "Authentication message created successfully." },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "message": { "type": "string", "description": "The one-time SIWE message to sign." }
+            },
+            "required": ["message"]
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "AuthVerifySuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["AUTH_VERIFIED"] },
+          "message": { "type": "string", "default": "Wallet signature verified successfully." },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "accessToken": { "type": "string" },
+              "isNotRegistered": { "type": "boolean" },
+              "address": { "type": "string" },
+              "name": { "type": "string", "nullable": true, "description": "Null when the wallet is not registered." },
+              "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"], "nullable": true, "description": "Null when the wallet is not registered." },
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true, "description": "Null when the wallet is not registered or has no profile image." }
+            },
+            "required": ["accessToken", "isNotRegistered", "address", "name", "role", "imageUrl"]
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "AuthMeSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["PROFILE_RETRIEVED"] },
+          "message": { "type": "string", "default": "Profile retrieved successfully." },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "address": { "type": "string" },
+              "name": { "type": "string" },
+              "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"] },
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true }
+            },
+            "required": ["address", "name", "role", "imageUrl"]
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      }
+    }
+  },
   "x-readme": { "explorer-enabled": true, "proxy-enabled": true }
 }
