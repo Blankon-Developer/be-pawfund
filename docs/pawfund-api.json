@@ -1047,29 +1047,54 @@
       "get": {
         "tags": ["Supporter Profile"],
         "summary": "Get My Supporter Profile",
+        "security": [{ "BearerAuth": [] }],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Supporter profile retrieved successfully.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "name": { "type": "string" },
-                        "email": { "type": "string" },
-                        "walletAddress": { "type": "string" },
-                        "imageUrl": { "type": "string" }
-                      },
-                      "required": ["name", "imageUrl", "email", "walletAddress"]
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/MySupporterProfileSuccessResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "A Bearer access token is missing, malformed, invalid, or expired.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" },
+              "WWW-Authenticate": { "$ref": "#/components/headers/BearerAuthentication" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthAccessTokenError" }
+              }
+            }
+          },
+          "404": {
+            "description": "No supporter profile is registered for the authenticated wallet.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SupporterProfileNotFoundError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while retrieving the supporter profile.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
+              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
@@ -1984,6 +2009,40 @@
           "errors": { "type": "object", "nullable": true }
         },
         "required": ["status", "code", "message", "data", "errors"]
+      },
+      "MySupporterProfileSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["PROFILE_RETRIEVED"] },
+          "message": { "type": "string", "default": "Profile retrieved successfully." },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "email": { "type": "string" },
+              "walletAddress": { "type": "string" },
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true }
+            },
+            "required": ["name", "email", "walletAddress", "imageUrl"]
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "SupporterProfileNotFoundError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["PROFILE_NOT_FOUND"] },
+              "message": { "type": "string", "default": "No supporter profile is registered for the authenticated wallet." }
+            }
+          }
+        ]
       }
     }
   },

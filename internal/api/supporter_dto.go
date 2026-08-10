@@ -77,7 +77,7 @@ type registerSupporterResponse struct {
 	Role          domain.UserRole `json:"role"`
 }
 
-type getSupporterProfileResponse struct {
+type mySupporterProfileResponse struct {
 	Name          string  `json:"name"`
 	Email         string  `json:"email"`
 	WalletAddress string  `json:"walletAddress"`

@@ -367,7 +367,7 @@ func TestHandleGetSupporterProfile(t *testing.T) {
 				return
 			}
 
-			var data getSupporterProfileResponse
+			var data mySupporterProfileResponse
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode profile data: %v", err)
 			}

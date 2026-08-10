@@ -120,7 +120,7 @@ func (h *SupporterHandler) HandleGetProfile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	response := getSupporterProfileResponse{
+	response := mySupporterProfileResponse{
 		Name:          supporter.Name,
 		Email:         supporter.Email,
 		WalletAddress: supporter.WalletAddress,
