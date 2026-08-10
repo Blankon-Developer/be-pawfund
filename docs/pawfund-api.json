@@ -38,15 +38,16 @@
         "tags": ["Registration"],
         "summary": "Register Fundraiser",
         "responses": {
-          "200": {
-            "description": "Success",
+          "201": {
+            "description": "Fundraiser account created successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"], "default": "success" },
+                    "code": { "type": "string", "enum": ["FUNDRAISER_REGISTERED"], "default": "FUNDRAISER_REGISTERED" },
+                    "message": { "type": "string", "default": "Fundraiser account created successfully." },
                     "data": {
                       "type": "object",
                       "properties": {
@@ -77,6 +78,8 @@
                         "zipCode": { "type": "string", "default": "53461" },
                         "imageUrl": {
                           "type": "string",
+                          "format": "uri",
+                          "nullable": true,
                           "default": "https://pawfund.com/images/0xA7Dd557C3628e35D4CC9618F13Aa94D57FDb7E7C.png"
                         },
                         "walletAddress": {
@@ -93,27 +96,111 @@
                         "name",
                         "email",
                         "contactPerson",
+                        "socialUrl",
                         "country",
                         "zipCode",
+                        "imageUrl",
                         "walletAddress",
                         "role"
                       ]
-                    }
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
           },
+          "400": {
+            "description": "The request body is malformed, contains unknown fields, or is not a single JSON object.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["INVALID_REQUEST"] },
+                "message": { "type": "string", "default": "Request body must contain one valid JSON object." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "401": {
+            "description": "A Bearer access token is missing, malformed, invalid, or expired.",
+            "headers": {
+              "WWW-Authenticate": { "schema": { "type": "string", "default": "Bearer" }, "description": "Authentication scheme required by this endpoint." }
+            },
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["ACCESS_TOKEN_REQUIRED", "INVALID_ACCESS_TOKEN"] },
+                "message": { "type": "string" },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "409": {
+            "description": "The email address or wallet address is already registered.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["EMAIL_ALREADY_REGISTERED", "WALLET_ALREADY_REGISTERED"] },
+                "message": { "type": "string" },
+                "data": { "type": "object", "nullable": true },
+                "errors": {
+                  "type": "object",
+                  "properties": {
+                    "email": { "type": "array", "items": { "type": "string" } },
+                    "walletAddress": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "413": {
+            "description": "The request body exceeds the 1 MiB limit.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["REQUEST_TOO_LARGE"] },
+                "message": { "type": "string", "default": "Request body exceeds the 1 MiB limit." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "415": {
+            "description": "The request Content-Type is not application/json.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["UNSUPPORTED_MEDIA_TYPE"] },
+                "message": { "type": "string", "default": "Content-Type must be application/json." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "One or more registration fields are missing or invalid.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["error"] },
+                    "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+                    "message": { "type": "string", "default": "One or more fields are invalid." },
+                    "data": { "type": "object", "nullable": true },
                     "errors": {
                       "type": "object",
                       "properties": {
@@ -145,20 +232,42 @@
                           "type": "array",
                           "items": { "type": "string" }
                         },
-                        "image": {
+                        "imageObjectKey": {
                           "type": "array",
                           "items": { "type": "string" }
                         }
                       }
                     }
                   },
-                  "required": ["code", "message", "errors"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while registering the fundraiser.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["INTERNAL_SERVER_ERROR"] },
+                "message": { "type": "string", "default": "An internal server error occurred." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
           }
         },
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": { "type": "string", "default": "Bearer {token}" },
+            "required": true,
+            "description": "Bearer access token obtained after verifying a SIWE signature."
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -177,7 +286,7 @@
                   },
                   "socialUrl": { "type": "string" },
                   "country": { "type": "string" },
-                  "zipCode": { "type": "number" },
+                  "zipCode": { "type": "string" },
                   "imageObjectKey": { "type": "string" }
                 },
                 "required": [
@@ -193,7 +302,7 @@
             }
           }
         },
-        "operationId": "post_register-supporter-1"
+        "operationId": "post_register-fundraiser"
       }
     },
     "/auth/me": {
@@ -1249,15 +1358,16 @@
         "tags": ["Registration"],
         "summary": "Register Supporter",
         "responses": {
-          "200": {
-            "description": "Success",
+          "201": {
+            "description": "Supporter account created successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"], "default": "success" },
+                    "code": { "type": "string", "enum": ["SUPPORTER_REGISTERED"], "default": "SUPPORTER_REGISTERED" },
+                    "message": { "type": "string", "default": "Supporter account created successfully." },
                     "data": {
                       "type": "object",
                       "properties": {
@@ -1273,6 +1383,8 @@
                         },
                         "imageUrl": {
                           "type": "string",
+                          "format": "uri",
+                          "nullable": true,
                           "default": "https://pawfund.com/images/0xA7Dd557C3628e35D4CC9618F13Aa94D57FDb7E7C.png"
                         },
                         "role": {
@@ -1281,23 +1393,105 @@
                           "default": "SUPPORTER"
                         }
                       },
-                      "required": ["walletAddress", "email", "name", "role"]
-                    }
+                      "required": ["walletAddress", "email", "name", "imageUrl", "role"]
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
           },
+          "400": {
+            "description": "The request body is malformed, contains unknown fields, or is not a single JSON object.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["INVALID_REQUEST"] },
+                "message": { "type": "string", "default": "Request body must contain one valid JSON object." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "401": {
+            "description": "A Bearer access token is missing, malformed, invalid, or expired.",
+            "headers": {
+              "WWW-Authenticate": { "schema": { "type": "string", "default": "Bearer" }, "description": "Authentication scheme required by this endpoint." }
+            },
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["ACCESS_TOKEN_REQUIRED", "INVALID_ACCESS_TOKEN"] },
+                "message": { "type": "string" },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "409": {
+            "description": "The email address or wallet address is already registered.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["EMAIL_ALREADY_REGISTERED", "WALLET_ALREADY_REGISTERED"] },
+                "message": { "type": "string" },
+                "data": { "type": "object", "nullable": true },
+                "errors": {
+                  "type": "object",
+                  "properties": {
+                    "email": { "type": "array", "items": { "type": "string" } },
+                    "walletAddress": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "413": {
+            "description": "The request body exceeds the 1 MiB limit.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["REQUEST_TOO_LARGE"] },
+                "message": { "type": "string", "default": "Request body exceeds the 1 MiB limit." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
+          "415": {
+            "description": "The request Content-Type is not application/json.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["UNSUPPORTED_MEDIA_TYPE"] },
+                "message": { "type": "string", "default": "Content-Type must be application/json." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
+          },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "One or more registration fields are missing or invalid.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["error"] },
+                    "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+                    "message": { "type": "string", "default": "One or more fields are invalid." },
+                    "data": { "type": "object", "nullable": true },
                     "errors": {
                       "type": "object",
                       "properties": {
@@ -1308,23 +1502,41 @@
                         "email": {
                           "type": "array",
                           "items": { "type": "string" }
+                        },
+                        "imageObjectKey": {
+                          "type": "array",
+                          "items": { "type": "string" }
                         }
                       }
                     }
                   },
-                  "required": ["code", "message", "errors"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while registering the supporter.",
+            "content": { "application/json": { "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "enum": ["error"] },
+                "code": { "type": "string", "enum": ["INTERNAL_SERVER_ERROR"] },
+                "message": { "type": "string", "default": "An internal server error occurred." },
+                "data": { "type": "object", "nullable": true },
+                "errors": { "type": "object", "nullable": true }
+              },
+              "required": ["status", "code", "message", "data", "errors"]
+            } } }
           }
         },
         "parameters": [
           {
             "in": "header",
-            "name": "accessToken",
-            "schema": { "type": "string" },
+            "name": "Authorization",
+            "schema": { "type": "string", "default": "Bearer {token}" },
             "required": true,
-            "description": "Access token yang didapat setelah `Get Challenge` dan `Verify Signature`"
+            "description": "Bearer access token obtained after verifying a SIWE signature."
           }
         ],
         "operationId": "post_register-supporter",
