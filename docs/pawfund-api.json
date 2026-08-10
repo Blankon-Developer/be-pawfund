@@ -375,6 +375,25 @@
           }
         },
         "operationId": "put_fundraiser-profile"
+      },
+      "delete": {
+        "tags": ["Fundraiser Profile"],
+        "summary": "Delete My Fundraiser Profile",
+        "responses": {
+          "204": { "description": "Profile deleted successfully. The response has no body." },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "404": { "description": "No fundraiser profile is registered for the authenticated wallet." },
+          "409": { "description": "The fundraiser has one or more active campaigns." }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": { "type": "string", "default": "Bearer {token}" },
+            "required": true
+          }
+        ],
+        "operationId": "delete_fundraiser-profile"
       }
     },
     "/fundraiser/campaigns": {
@@ -1201,28 +1220,6 @@
           }
         },
         "operationId": "post_uploads-profile-image-presign"
-      }
-    },
-    "/fundraiser/profile/{address}/delete": {
-      "delete": {
-        "tags": ["Fundraiser Profile"],
-        "summary": "Delete Fundraiser Profile",
-        "responses": { "200": { "description": "" } },
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "schema": { "type": "string", "default": "Bearer {token}" },
-            "required": true
-          },
-          {
-            "in": "path",
-            "name": "address",
-            "schema": { "type": "string" },
-            "required": true
-          }
-        ],
-        "operationId": "delete_fundraiser-profile-address-delete"
       }
     },
     "/supporter/profile/{address}/delete": {

@@ -84,6 +84,7 @@ func (r *PostgresSupporterRepository) FindByWalletAddress(
 		FROM users u
 		JOIN supporters s ON s.id = u.id
 		WHERE u.role = 'supporter'
+			AND u.deleted_at IS NULL
 			AND LOWER(u.wallet_address) = LOWER($1)
 	`
 

@@ -74,6 +74,7 @@ func (r *PostgresFundraiserRepository) FindByWalletAddress(
 		FROM users u
 		JOIN fundraisers f ON f.id = u.id
 		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
 			AND LOWER(u.wallet_address) = LOWER($1)
 	`
 
@@ -127,6 +128,7 @@ func (r *PostgresFundraiserRepository) ReplaceProfile(
 		FROM users u
 		JOIN fundraisers f ON f.id = u.id
 		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
 			AND LOWER(u.wallet_address) = LOWER($1)
 		FOR UPDATE OF u, f
 	`
@@ -203,6 +205,98 @@ func (r *PostgresFundraiserRepository) ReplaceProfile(
 
 	if err := tx.Commit(); err != nil {
 		return ReplaceFundraiserProfileResult{}, false, fmt.Errorf("repository: commit replace fundraiser profile transaction: %w", err)
+	}
+
+	return result, true, nil
+}
+
+func (r *PostgresFundraiserRepository) DeleteProfile(
+	ctx context.Context,
+	walletAddress string,
+) (DeleteFundraiserProfileResult, bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: begin delete fundraiser profile transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const lockFundraiser = `
+		SELECT u.id, f.image_object_key
+		FROM users u
+		JOIN fundraisers f ON f.id = u.id
+		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
+		FOR UPDATE OF u, f
+	`
+
+	var (
+		fundraiserID       string
+		currentImageObject sql.NullString
+	)
+	if err := tx.QueryRowContext(ctx, lockFundraiser, strings.TrimSpace(walletAddress)).Scan(
+		&fundraiserID,
+		&currentImageObject,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DeleteFundraiserProfileResult{}, false, nil
+		}
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: lock fundraiser profile for deletion: %w", err)
+	}
+
+	const hasActiveCampaign = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM campaigns
+			WHERE fundraiser_id = $1 AND status = 'active'
+		)
+	`
+	var activeCampaignExists bool
+	if err := tx.QueryRowContext(ctx, hasActiveCampaign, fundraiserID).Scan(&activeCampaignExists); err != nil {
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: check fundraiser active campaigns: %w", err)
+	}
+	if activeCampaignExists {
+		return DeleteFundraiserProfileResult{}, true, ErrFundraiserHasActiveCampaigns
+	}
+
+	const clearFundraiserImage = `UPDATE fundraisers SET image_object_key = NULL WHERE id = $1`
+	if _, err := tx.ExecContext(ctx, clearFundraiserImage, fundraiserID); err != nil {
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: clear fundraiser profile image: %w", err)
+	}
+
+	const softDeleteUser = `UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`
+	if _, err := tx.ExecContext(ctx, softDeleteUser, fundraiserID); err != nil {
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: soft delete fundraiser profile: %w", err)
+	}
+
+	result := DeleteFundraiserProfileResult{}
+	if currentImageObject.Valid {
+		const imageStillReferenced = `
+			SELECT EXISTS (
+				SELECT 1
+				FROM fundraisers f
+				JOIN users u ON u.id = f.id
+				WHERE f.image_object_key = $1 AND u.deleted_at IS NULL
+				UNION ALL
+				SELECT 1
+				FROM supporters s
+				JOIN users u ON u.id = s.id
+				WHERE s.image_object_key = $1 AND u.deleted_at IS NULL
+			)
+		`
+		var referenced bool
+		if err := tx.QueryRowContext(ctx, imageStillReferenced, currentImageObject.String).Scan(&referenced); err != nil {
+			return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: check deleted fundraiser image references: %w", err)
+		}
+		if !referenced {
+			imageObjectKey := currentImageObject.String
+			result.ImageObjectKey = &imageObjectKey
+			result.DeleteImageObjectFile = true
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return DeleteFundraiserProfileResult{}, false, fmt.Errorf("repository: commit delete fundraiser profile transaction: %w", err)
 	}
 
 	return result, true, nil

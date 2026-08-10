@@ -144,6 +144,29 @@ func (s *FundraiserService) ReplaceProfile(ctx context.Context, input ReplaceFun
 	return nil
 }
 
+func (s *FundraiserService) DeleteProfile(ctx context.Context, walletAddress string) error {
+	result, found, err := s.repository.DeleteProfile(ctx, strings.TrimSpace(walletAddress))
+	if err != nil {
+		if errors.Is(err, repository.ErrFundraiserHasActiveCampaigns) {
+			return ErrActiveCampaignsExist
+		}
+		return fmt.Errorf("service: delete fundraiser profile: %w", err)
+	}
+	if !found {
+		return ErrProfileNotFound
+	}
+
+	if result.DeleteImageObjectFile && result.ImageObjectKey != nil && s.objectDeleter != nil {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.objectDeleter.Delete(cleanupContext, *result.ImageObjectKey); err != nil {
+			slog.Warn("delete fundraiser profile image", "object_key", *result.ImageObjectKey, "error", err)
+		}
+	}
+
+	return nil
+}
+
 func normalizeOptionalString(value *string) *string {
 	if value == nil {
 		return nil

@@ -332,6 +332,128 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 	}
 }
 
+func TestPostgresFundraiserRepositoryDeleteProfile(t *testing.T) {
+	const fundraiserWallet = "0xFundraiserChecksum"
+	imageObjectKey := "profiles/delete-fundraiser.png"
+
+	tests := []struct {
+		name                string
+		createProfile       bool
+		shareImage          bool
+		activeCampaign      bool
+		wantError           error
+		wantFound           bool
+		wantDeleteImage     bool
+		wantDeleted         bool
+		allowReregistration bool
+	}{
+		{
+			name:                "soft deletes profile and allows fresh registration",
+			createProfile:       true,
+			wantFound:           true,
+			wantDeleteImage:     true,
+			wantDeleted:         true,
+			allowReregistration: true,
+		},
+		{
+			name:          "keeps image shared by an active supporter",
+			createProfile: true,
+			shareImage:    true,
+			wantFound:     true,
+			wantDeleted:   true,
+		},
+		{
+			name:           "rejects profile with active campaign",
+			createProfile:  true,
+			activeCampaign: true,
+			wantError:      repository.ErrFundraiserHasActiveCampaigns,
+			wantFound:      true,
+		},
+		{name: "returns not found for unknown wallet"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+
+			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			fundraiser := newFundraiser("rescue@example.com", fundraiserWallet, &imageObjectKey)
+			if test.createProfile {
+				mustCreateFundraiser(t, repo, fundraiser)
+				if test.shareImage {
+					supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+					mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &imageObjectKey))
+				}
+				if test.activeCampaign {
+					mustCreateActiveCampaign(t, fundraiser.ID)
+				}
+			}
+
+			result, found, err := repo.DeleteProfile(t.Context(), strings.ToLower(fundraiserWallet))
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("DeleteProfile() error = %v, want %v", err, test.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("DeleteProfile() unexpected error: %v", err)
+			}
+			if found != test.wantFound {
+				t.Fatalf("found = %v, want %v", found, test.wantFound)
+			}
+			if result.DeleteImageObjectFile != test.wantDeleteImage {
+				t.Errorf("DeleteImageObjectFile = %v, want %v", result.DeleteImageObjectFile, test.wantDeleteImage)
+			}
+			if test.wantDeleteImage && !equalStringPointers(result.ImageObjectKey, &imageObjectKey) {
+				t.Errorf("ImageObjectKey = %v, want %v", result.ImageObjectKey, imageObjectKey)
+			}
+			if !test.createProfile {
+				return
+			}
+
+			var deletedAt sql.NullTime
+			var storedImage sql.NullString
+			if err := testDatabase.QueryRowContext(
+				t.Context(),
+				`SELECT u.deleted_at, f.image_object_key
+				 FROM users u
+				 JOIN fundraisers f ON f.id = u.id
+				 WHERE u.id = $1`,
+				fundraiser.ID,
+			).Scan(&deletedAt, &storedImage); err != nil {
+				t.Fatalf("query deleted fundraiser: %v", err)
+			}
+			if deletedAt.Valid != test.wantDeleted {
+				t.Errorf("deleted_at valid = %v, want %v", deletedAt.Valid, test.wantDeleted)
+			}
+			if test.wantDeleted && storedImage.Valid {
+				t.Errorf("deleted profile image = %q, want NULL", storedImage.String)
+			}
+			if !test.wantDeleted {
+				return
+			}
+
+			if profile, active, err := repo.FindByWalletAddress(t.Context(), fundraiserWallet); err != nil || active {
+				t.Errorf("FindByWalletAddress() after delete = %#v, %v, %v", profile, active, err)
+			}
+			authRepo := repository.NewPostgresAuthRepository(testDatabase)
+			if profile, active, err := authRepo.FindProfileByWalletAddress(t.Context(), fundraiserWallet); err != nil || active {
+				t.Errorf("FindProfileByWalletAddress() after delete = %#v, %v, %v", profile, active, err)
+			}
+
+			if test.allowReregistration {
+				created, err := repo.Create(t.Context(), newFundraiser("rescue@example.com", fundraiserWallet, nil))
+				if err != nil {
+					t.Fatalf("re-register fundraiser: %v", err)
+				}
+				if created.ID == fundraiser.ID {
+					t.Error("re-registered fundraiser reused deleted ID")
+				}
+			}
+		})
+	}
+}
+
 func newFundraiser(email, wallet string, imageObjectKey *string) domain.Fundraiser {
 	socialURL := "https://example.com/rescue"
 	return domain.Fundraiser{
@@ -355,6 +477,42 @@ func mustCreateFundraiser(t *testing.T, repo *repository.PostgresFundraiserRepos
 	t.Helper()
 	if _, err := repo.Create(t.Context(), fundraiser); err != nil {
 		t.Fatalf("prepare fundraiser: %v", err)
+	}
+}
+
+func mustCreateActiveCampaign(t *testing.T, fundraiserID uuid.UUID) {
+	t.Helper()
+	eventID := uuid.New()
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+		 VALUES ($1, $2, $3, 'campaign_created', $4, CURRENT_TIMESTAMP)`,
+		eventID,
+		"tx-"+eventID.String(),
+		0,
+		1,
+	); err != nil {
+		t.Fatalf("prepare campaign event: %v", err)
+	}
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO campaigns (
+			id, fundraiser_id, event_id, title, short_description, story,
+			goal_amount, contract_address, image_object_key, country, zip_code
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		uuid.New(),
+		fundraiserID,
+		eventID,
+		"Emergency Rescue",
+		"Emergency rescue campaign",
+		"Help us rescue animals in need.",
+		100,
+		"contract-"+eventID.String(),
+		"campaigns/rescue.png",
+		"Indonesia",
+		"10110",
+	); err != nil {
+		t.Fatalf("prepare active campaign: %v", err)
 	}
 }
 

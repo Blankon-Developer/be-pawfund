@@ -364,6 +364,133 @@ func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeleteFundraiserProfileEndpoint(t *testing.T) {
+	const fundraiserWallet = "0xFundraiserChecksum"
+	imageObjectKey := "profiles/fundraiser-delete.png"
+
+	tests := []struct {
+		name            string
+		createProfile   bool
+		shareImage      bool
+		activeCampaign  bool
+		authorization   string
+		wantHTTP        int
+		wantCode        string
+		wantImageExists *bool
+	}{
+		{
+			name:            "deletes profile and its unreferenced image",
+			createProfile:   true,
+			wantHTTP:        http.StatusNoContent,
+			wantImageExists: integrationBoolPointer(false),
+		},
+		{
+			name:            "keeps a shared image",
+			createProfile:   true,
+			shareImage:      true,
+			wantHTTP:        http.StatusNoContent,
+			wantImageExists: integrationBoolPointer(true),
+		},
+		{
+			name:            "rejects fundraiser with active campaign",
+			createProfile:   true,
+			activeCampaign:  true,
+			wantHTTP:        http.StatusConflict,
+			wantCode:        "ACTIVE_CAMPAIGNS_EXIST",
+			wantImageExists: integrationBoolPointer(true),
+		},
+		{name: "returns not found for unknown wallet", wantHTTP: http.StatusNotFound, wantCode: "PROFILE_NOT_FOUND"},
+		{name: "requires access token", authorization: "missing", wantHTTP: http.StatusUnauthorized, wantCode: "ACCESS_TOKEN_REQUIRED"},
+		{name: "rejects invalid access token", authorization: "invalid", wantHTTP: http.StatusUnauthorized, wantCode: "INVALID_ACCESS_TOKEN"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			removeIntegrationObject(t, imageObjectKey)
+			t.Cleanup(func() { removeIntegrationObject(t, imageObjectKey) })
+
+			if test.createProfile {
+				putProfileImageObject(t, imageObjectKey)
+				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				fundraiser := newFundraiser("rescue@example.com", fundraiserWallet, &imageObjectKey)
+				mustCreateFundraiser(t, repo, fundraiser)
+				if test.shareImage {
+					supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+					mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &imageObjectKey))
+				}
+				if test.activeCampaign {
+					mustCreateActiveCampaign(t, fundraiser.ID)
+				}
+			}
+
+			router, jwtManager := newFundraiserProfileIntegrationRouter(t)
+			request := httptest.NewRequest(http.MethodDelete, "/v1/fundraiser/profile", nil)
+			switch test.authorization {
+			case "missing":
+			case "invalid":
+				request.Header.Set("Authorization", "Bearer invalid-token")
+			default:
+				token, err := jwtManager.Generate(strings.ToLower(fundraiserWallet), "", time.Hour)
+				if err != nil {
+					t.Fatalf("generate access token: %v", err)
+				}
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			if response.Code != test.wantHTTP {
+				t.Fatalf("DELETE = %d, want %d; body: %s", response.Code, test.wantHTTP, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusNoContent {
+				if response.Body.Len() != 0 {
+					t.Errorf("204 body = %q, want empty", response.Body.String())
+				}
+			} else {
+				result := decodeAuthEndpointResult(t, response)
+				if result.Code != test.wantCode {
+					t.Errorf("response code = %q, want %q; body: %s", result.Code, test.wantCode, result.Body)
+				}
+			}
+
+			if test.wantImageExists != nil {
+				_, err := testStorageClient.StatObject(t.Context(), testStorageBucket, imageObjectKey, minio.StatObjectOptions{})
+				if *test.wantImageExists && err != nil {
+					t.Errorf("profile image was deleted: %v", err)
+				}
+				if !*test.wantImageExists && err == nil {
+					t.Error("unreferenced profile image still exists")
+				}
+			}
+
+			if test.wantHTTP != http.StatusNoContent {
+				return
+			}
+			profileRequest := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/profile", nil)
+			profileRequest.Header.Set("Authorization", request.Header.Get("Authorization"))
+			profileResponse := httptest.NewRecorder()
+			router.ServeHTTP(profileResponse, profileRequest)
+			profileResult := decodeAuthEndpointResult(t, profileResponse)
+			if profileResult.HTTPStatus != http.StatusNotFound || profileResult.Code != "PROFILE_NOT_FOUND" {
+				t.Errorf("GET own profile after delete = %d/%q; body: %s", profileResult.HTTPStatus, profileResult.Code, profileResult.Body)
+			}
+
+			publicRequest := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/"+fundraiserWallet, nil)
+			publicResponse := httptest.NewRecorder()
+			router.ServeHTTP(publicResponse, publicRequest)
+			publicResult := decodeAuthEndpointResult(t, publicResponse)
+			if publicResult.HTTPStatus != http.StatusNotFound || publicResult.Code != "PROFILE_NOT_FOUND" {
+				t.Errorf("GET public profile after delete = %d/%q; body: %s", publicResult.HTTPStatus, publicResult.Code, publicResult.Body)
+			}
+		})
+	}
+}
+
 func TestFundraiserProfileReplaceRouteRejectsPatch(t *testing.T) {
 	router, _ := newFundraiserProfileIntegrationRouter(t)
 	request := httptest.NewRequest(http.MethodPatch, "/v1/fundraiser/profile", nil)
@@ -387,6 +514,10 @@ func putProfileImageObject(t *testing.T, objectKey string) {
 	); err != nil {
 		t.Fatalf("put profile image %q: %v", objectKey, err)
 	}
+}
+
+func integrationBoolPointer(value bool) *bool {
+	return &value
 }
 
 func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {

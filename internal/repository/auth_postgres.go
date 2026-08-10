@@ -32,7 +32,8 @@ func (r *PostgresAuthRepository) FindProfileByWalletAddress(
 			ON s.id = u.id AND u.role = 'supporter'
 		LEFT JOIN fundraisers f
 			ON f.id = u.id AND u.role = 'fundraiser'
-		WHERE LOWER(u.wallet_address) = LOWER($1)
+		WHERE u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
 	`
 
 	var profile domain.AuthProfile

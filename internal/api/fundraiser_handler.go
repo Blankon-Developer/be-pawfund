@@ -25,6 +25,7 @@ type FundraiserService interface {
 	Register(ctx context.Context, input service.RegisterFundraiserInput) (domain.Fundraiser, error)
 	GetProfile(ctx context.Context, walletAddress string) (domain.Fundraiser, error)
 	ReplaceProfile(ctx context.Context, input service.ReplaceFundraiserProfileInput) error
+	DeleteProfile(ctx context.Context, walletAddress string) error
 }
 
 type FundraiserHandler struct {
@@ -201,6 +202,52 @@ func (h *FundraiserHandler) HandleReplaceProfile(w http.ResponseWriter, r *http.
 			)
 		default:
 			h.handleServiceError(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *FundraiserHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	err := h.service.DeleteProfile(r.Context(), walletAddress)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrProfileNotFound):
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No fundraiser profile is registered for the authenticated wallet.",
+				nil,
+			)
+		case errors.Is(err, service.ErrActiveCampaignsExist):
+			h.Error(
+				w,
+				http.StatusConflict,
+				"ACTIVE_CAMPAIGNS_EXIST",
+				"Fundraiser profiles with active campaigns cannot be deleted.",
+				nil,
+			)
+		default:
+			h.Logger.Error("delete fundraiser profile", "error", err)
+			h.InternalError(w)
 		}
 		return
 	}

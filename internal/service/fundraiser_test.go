@@ -16,9 +16,11 @@ type stubFundraiserRepository struct {
 	create        func(context.Context, domain.Fundraiser) (domain.Fundraiser, error)
 	find          func(context.Context, string) (domain.Fundraiser, bool, error)
 	replace       func(context.Context, string, domain.FundraiserProfileReplacement) (repository.ReplaceFundraiserProfileResult, bool, error)
+	delete        func(context.Context, string) (repository.DeleteFundraiserProfileResult, bool, error)
 	called        int
 	findCalled    int
 	replaceCalled int
+	deleteCalled  int
 }
 
 type stubFundraiserObjectDeleter struct {
@@ -56,6 +58,17 @@ func (s *stubFundraiserRepository) ReplaceProfile(
 		return repository.ReplaceFundraiserProfileResult{}, false, nil
 	}
 	return s.replace(ctx, walletAddress, profile)
+}
+
+func (s *stubFundraiserRepository) DeleteProfile(
+	ctx context.Context,
+	walletAddress string,
+) (repository.DeleteFundraiserProfileResult, bool, error) {
+	s.deleteCalled++
+	if s.delete == nil {
+		return repository.DeleteFundraiserProfileResult{}, false, nil
+	}
+	return s.delete(ctx, walletAddress)
 }
 
 func TestFundraiserServiceRegister(t *testing.T) {
@@ -378,6 +391,86 @@ func TestFundraiserServiceReplaceProfile(t *testing.T) {
 			}
 			if test.wantDeleteCall && deleter.objectKey != oldImageObjectKey {
 				t.Errorf("deleted object = %q, want %q", deleter.objectKey, oldImageObjectKey)
+			}
+		})
+	}
+}
+
+func TestFundraiserServiceDeleteProfile(t *testing.T) {
+	imageObjectKey := "profiles/old.png"
+	repositoryFailure := errors.New("repository failure")
+	deleteFailure := errors.New("storage failure")
+
+	tests := []struct {
+		name               string
+		found              bool
+		repositoryError    error
+		deleteError        error
+		deleteResult       repository.DeleteFundraiserProfileResult
+		wantError          error
+		wantDeleteCall     bool
+		wantRepositoryCall bool
+	}{
+		{
+			name:  "deletes profile and removes unreferenced image",
+			found: true,
+			deleteResult: repository.DeleteFundraiserProfileResult{
+				ImageObjectKey:        &imageObjectKey,
+				DeleteImageObjectFile: true,
+			},
+			wantDeleteCall:     true,
+			wantRepositoryCall: true,
+		},
+		{
+			name:  "does not fail after an image delete failure",
+			found: true,
+			deleteResult: repository.DeleteFundraiserProfileResult{
+				ImageObjectKey:        &imageObjectKey,
+				DeleteImageObjectFile: true,
+			},
+			deleteError:        deleteFailure,
+			wantDeleteCall:     true,
+			wantRepositoryCall: true,
+		},
+		{name: "returns profile not found", wantError: ErrProfileNotFound, wantRepositoryCall: true},
+		{name: "rejects fundraiser with active campaigns", found: true, repositoryError: repository.ErrFundraiserHasActiveCampaigns, wantError: ErrActiveCampaignsExist, wantRepositoryCall: true},
+		{name: "wraps unexpected repository failure", found: true, repositoryError: repositoryFailure, wantError: repositoryFailure, wantRepositoryCall: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			type contextKey struct{}
+			ctx := context.WithValue(context.Background(), contextKey{}, "request-context")
+			deleter := &stubFundraiserObjectDeleter{err: test.deleteError}
+			repo := &stubFundraiserRepository{
+				delete: func(gotCtx context.Context, walletAddress string) (repository.DeleteFundraiserProfileResult, bool, error) {
+					if gotCtx.Value(contextKey{}) != "request-context" {
+						t.Error("request context was not propagated")
+					}
+					if walletAddress != "0xWalletChecksum" {
+						t.Errorf("wallet address = %q", walletAddress)
+					}
+					return test.deleteResult, test.found, test.repositoryError
+				},
+			}
+			fundraiserService := NewFundraiserService(repo, nil, deleter)
+			err := fundraiserService.DeleteProfile(ctx, " 0xWalletChecksum ")
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("DeleteProfile() error = %v, want %v", err, test.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("DeleteProfile() unexpected error: %v", err)
+			}
+			if (repo.deleteCalled > 0) != test.wantRepositoryCall {
+				t.Errorf("repository calls = %d, want called = %v", repo.deleteCalled, test.wantRepositoryCall)
+			}
+			if (deleter.calls > 0) != test.wantDeleteCall {
+				t.Errorf("delete calls = %d, want called = %v", deleter.calls, test.wantDeleteCall)
+			}
+			if test.wantDeleteCall && deleter.objectKey != imageObjectKey {
+				t.Errorf("deleted object = %q, want %q", deleter.objectKey, imageObjectKey)
 			}
 		})
 	}
