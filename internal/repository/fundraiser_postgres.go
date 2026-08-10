@@ -248,7 +248,9 @@ func (r *PostgresFundraiserRepository) DeleteProfile(
 		SELECT EXISTS (
 			SELECT 1
 			FROM campaigns
-			WHERE fundraiser_id = $1 AND status = 'active'
+			WHERE fundraiser_id = $1
+				AND status = 'active'
+				AND deployment_status IN ('pending', 'submitted', 'deployed')
 		)
 	`
 	var activeCampaignExists bool

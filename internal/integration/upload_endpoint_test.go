@@ -17,6 +17,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
 	"github.com/Blankon-Developer/be-pawfund/internal/routes"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
@@ -30,6 +31,10 @@ func TestProfileImagePresignEndpoint(t *testing.T) {
 	token, err := jwtManager.Generate("0xUnregisteredWallet", "", time.Hour)
 	if err != nil {
 		t.Fatalf("generate access token: %v", err)
+	}
+	campaignToken, err := jwtManager.Generate("0xFundraiserWallet", domain.UserRoleFundraiser, time.Hour)
+	if err != nil {
+		t.Fatalf("generate fundraiser access token: %v", err)
 	}
 
 	t.Run("raw PUT with signed type and size succeeds", func(t *testing.T) {
@@ -108,6 +113,38 @@ func TestProfileImagePresignEndpoint(t *testing.T) {
 			t.Fatalf("oversized presign = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
 		}
 	})
+
+	t.Run("campaign image uses the campaign namespace", func(t *testing.T) {
+		payload := []byte("campaign-image-fixture")
+		presigned := requestCampaignImagePresign(t, router, campaignToken, "image/webp", int64(len(payload)))
+		t.Cleanup(func() { removeIntegrationObject(t, presigned.ObjectKey) })
+
+		response := putPresignedObject(t, presigned.URL, "image/webp", payload)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("raw PUT status = %d; body: %s", response.StatusCode, readResponseBody(t, response))
+		}
+		_ = response.Body.Close()
+		if !strings.HasPrefix(presigned.ObjectKey, "campaigns/") {
+			t.Errorf("campaign object key = %q", presigned.ObjectKey)
+		}
+	})
+
+	t.Run("campaign image requires fundraiser role", func(t *testing.T) {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/v1/uploads/campaign-image/presign",
+			strings.NewReader(`{"contentType":"image/png","size":1}`),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+
+		result := decodeAuthEndpointResult(t, response)
+		if result.HTTPStatus != http.StatusForbidden || result.Code != "FUNDRAISER_ACCESS_REQUIRED" {
+			t.Fatalf("unregistered campaign presign = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+		}
+	})
 }
 
 type profileImagePresignData struct {
@@ -173,6 +210,39 @@ func requestProfileImagePresign(
 	}
 	if !strings.HasPrefix(data.ObjectKey, "profiles/") || data.URL == "" {
 		t.Fatalf("presign data = %#v", data)
+	}
+	return data
+}
+
+func requestCampaignImagePresign(
+	t *testing.T,
+	router http.Handler,
+	token string,
+	contentType string,
+	size int64,
+) profileImagePresignData {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"contentType": contentType, "size": size})
+	if err != nil {
+		t.Fatalf("encode campaign presign request: %v", err)
+	}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/uploads/campaign-image/presign",
+		bytes.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	result := decodeAuthEndpointResult(t, response)
+	if result.HTTPStatus != http.StatusOK || result.Code != "CAMPAIGN_IMAGE_UPLOAD_PRESIGNED" {
+		t.Fatalf("campaign presign = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+	var data profileImagePresignData
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		t.Fatalf("decode campaign presign response: %v", err)
 	}
 	return data
 }

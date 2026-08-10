@@ -454,6 +454,41 @@ func TestPostgresFundraiserRepositoryDeleteProfile(t *testing.T) {
 	}
 }
 
+func TestPostgresFundraiserRepositoryDeleteProfileDeploymentStatuses(t *testing.T) {
+	tests := []struct {
+		deploymentStatus domain.CampaignDeploymentStatus
+		wantBlocked      bool
+	}{
+		{deploymentStatus: domain.CampaignDeploymentStatusPending, wantBlocked: true},
+		{deploymentStatus: domain.CampaignDeploymentStatusSubmitted, wantBlocked: true},
+		{deploymentStatus: domain.CampaignDeploymentStatusDeployed, wantBlocked: true},
+		{deploymentStatus: domain.CampaignDeploymentStatusFailed},
+	}
+
+	for _, test := range tests {
+		t.Run(string(test.deploymentStatus), func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			const walletAddress = "0xDeploymentStatusFundraiser"
+			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			fundraiser := newFundraiser("deployment@example.com", walletAddress, nil)
+			mustCreateFundraiser(t, repo, fundraiser)
+			mustCreateCampaignWithDeploymentStatus(t, fundraiser.ID, test.deploymentStatus)
+
+			_, _, err := repo.DeleteProfile(t.Context(), walletAddress)
+			if test.wantBlocked {
+				if !errors.Is(err, repository.ErrFundraiserHasActiveCampaigns) {
+					t.Fatalf("DeleteProfile() error = %v, want %v", err, repository.ErrFundraiserHasActiveCampaigns)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DeleteProfile() unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func newFundraiser(email, wallet string, imageObjectKey *string) domain.Fundraiser {
 	socialURL := "https://example.com/rescue"
 	return domain.Fundraiser{
@@ -482,35 +517,56 @@ func mustCreateFundraiser(t *testing.T, repo *repository.PostgresFundraiserRepos
 
 func mustCreateActiveCampaign(t *testing.T, fundraiserID uuid.UUID) {
 	t.Helper()
-	eventID := uuid.New()
-	if _, err := testDatabase.ExecContext(
-		t.Context(),
-		`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
-		 VALUES ($1, $2, $3, 'campaign_created', $4, CURRENT_TIMESTAMP)`,
-		eventID,
-		"tx-"+eventID.String(),
-		0,
-		1,
-	); err != nil {
-		t.Fatalf("prepare campaign event: %v", err)
+	mustCreateCampaignWithDeploymentStatus(t, fundraiserID, domain.CampaignDeploymentStatusDeployed)
+}
+
+func mustCreateCampaignWithDeploymentStatus(
+	t *testing.T,
+	fundraiserID uuid.UUID,
+	deploymentStatus domain.CampaignDeploymentStatus,
+) {
+	t.Helper()
+	var (
+		eventValue    any
+		contractValue any
+		keySuffix     = uuid.New().String()
+	)
+	if deploymentStatus == domain.CampaignDeploymentStatusDeployed {
+		eventID := uuid.New()
+		if _, err := testDatabase.ExecContext(
+			t.Context(),
+			`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+			 VALUES ($1, $2, $3, 'campaign_created', $4, CURRENT_TIMESTAMP)`,
+			eventID,
+			"tx-"+eventID.String(),
+			0,
+			1,
+		); err != nil {
+			t.Fatalf("prepare campaign event: %v", err)
+		}
+		eventValue = eventID
+		contractValue = "contract-" + eventID.String()
 	}
 	if _, err := testDatabase.ExecContext(
 		t.Context(),
 		`INSERT INTO campaigns (
 			id, fundraiser_id, event_id, title, short_description, story,
-			goal_amount, contract_address, image_object_key, country, zip_code
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			goal_amount, contract_address, end_at, image_object_key, country, zip_code,
+			deployment_status, idempotency_key
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP + INTERVAL '30 days', $9, $10, $11, $12, $13)`,
 		uuid.New(),
 		fundraiserID,
-		eventID,
+		eventValue,
 		"Emergency Rescue",
 		"Emergency rescue campaign",
 		"Help us rescue animals in need.",
 		100,
-		"contract-"+eventID.String(),
+		contractValue,
 		"campaigns/rescue.png",
 		"Indonesia",
 		"10110",
+		deploymentStatus,
+		"active-"+keySuffix,
 	); err != nil {
 		t.Fatalf("prepare active campaign: %v", err)
 	}

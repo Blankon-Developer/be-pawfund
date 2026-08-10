@@ -82,6 +82,29 @@ func TestUploadServicePresignProfileImage(t *testing.T) {
 	}
 }
 
+func TestUploadServicePresignCampaignImage(t *testing.T) {
+	generatedID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	presigner := &profileImagePresignerStub{url: "https://storage.example.com/presigned"}
+	uploadService := NewUploadService(presigner, func() (uuid.UUID, error) {
+		return generatedID, nil
+	})
+
+	result, err := uploadService.PresignCampaignImage(t.Context(), PresignCampaignImageInput{
+		ContentType: " image/webp ",
+		Size:        654321,
+	})
+	if err != nil {
+		t.Fatalf("PresignCampaignImage() unexpected error: %v", err)
+	}
+	wantKey := "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+	if result.ObjectKey != wantKey || result.URL != presigner.url {
+		t.Errorf("result = %#v", result)
+	}
+	if presigner.calls != 1 || presigner.objectKey != wantKey || presigner.contentType != "image/webp" || presigner.size != 654321 {
+		t.Errorf("presigner input = calls:%d key:%q type:%q size:%d", presigner.calls, presigner.objectKey, presigner.contentType, presigner.size)
+	}
+}
+
 func TestUploadServiceUsesUUIDV7ByDefault(t *testing.T) {
 	presigner := &profileImagePresignerStub{url: "https://storage.example.com/presigned"}
 	uploadService := NewUploadService(presigner, nil)

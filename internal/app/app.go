@@ -26,6 +26,7 @@ type Application struct {
 	UploadHandler     *api.UploadHandler
 	SupporterHandler  *api.SupporterHandler
 	FundraiserHandler *api.FundraiserHandler
+	CampaignHandler   *api.CampaignHandler
 	Authenticate      func(http.Handler) http.Handler
 }
 
@@ -87,10 +88,12 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 	supporterRepository := repository.NewPostgresSupporterRepository(db)
 	fundraiserRepository := repository.NewPostgresFundraiserRepository(db)
+	campaignRepository := repository.NewPostgresCampaignRepository(db)
 	authRepository := repository.NewPostgresAuthRepository(db)
 
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
+	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7)
 	authService := service.NewAuthService(
 		cacheClient,
 		authRepository,
@@ -107,6 +110,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 	supporterHandler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
 	fundraiserHandler := api.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
+	campaignHandler := api.NewCampaignHandler(campaignService, urlBuilder, logger)
 	authHandler := api.NewAuthHandler(authService, urlBuilder, logger)
 	uploadHandler := api.NewUploadHandler(uploadService, logger)
 
@@ -117,6 +121,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		UploadHandler:     uploadHandler,
 		SupporterHandler:  supporterHandler,
 		FundraiserHandler: fundraiserHandler,
+		CampaignHandler:   campaignHandler,
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}, nil
 }

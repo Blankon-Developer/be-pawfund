@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS donations (
   campaign_id UUID NOT NULL REFERENCES campaigns(id),
   supporter_id UUID NOT NULL REFERENCES supporters(id),
   event_id UUID UNIQUE NOT NULL REFERENCES blockchain_events(id),
-  amount INTEGER NOT NULL CHECK (amount > 0)
+  amount BIGINT NOT NULL CHECK (amount > 0)
 );
 
 CREATE INDEX donations_campaign_id_idx ON donations(campaign_id);

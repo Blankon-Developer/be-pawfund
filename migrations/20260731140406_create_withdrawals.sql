@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   id UUID PRIMARY KEY,
   campaign_id UUID NOT NULL REFERENCES campaigns(id),
   event_id UUID UNIQUE NOT NULL REFERENCES blockchain_events(id),
-  amount INTEGER NOT NULL CHECK (amount > 0),
+  amount BIGINT NOT NULL CHECK (amount > 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

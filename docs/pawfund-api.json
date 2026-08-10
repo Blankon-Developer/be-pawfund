@@ -591,27 +591,52 @@
       "post": {
         "tags": ["Fundraiser Campaigns"],
         "summary": "Create Campaign",
+        "description": "Persist a campaign deployment intent before the backend relayer creates its child contract. goalAmount uses atomic USDC units (6 decimals). Reusing the same Idempotency-Key with the same normalized payload returns the existing campaign.",
         "responses": {
           "201": {
-            "description": "",
+            "description": "Campaign persisted with pending deployment status.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"] },
+                    "code": { "type": "string", "enum": ["CAMPAIGN_CREATED"] },
+                    "message": { "type": "string", "default": "Campaign created successfully." },
                     "data": {
                       "type": "object",
-                      "properties": { "contractAddress": { "type": "string" } },
-                      "required": ["contractAddress"]
-                    }
+                      "properties": {
+                        "id": { "type": "string", "format": "uuid" },
+                        "title": { "type": "string" },
+                        "shortDescription": { "type": "string" },
+                        "story": { "type": "string" },
+                        "goalAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+                        "raisedAmount": { "type": "integer", "format": "int64" },
+                        "donorCount": { "type": "integer" },
+                        "endAt": { "type": "string", "format": "date-time" },
+                        "imageUrl": { "type": "string", "format": "uri" },
+                        "country": { "type": "string" },
+                        "zipCode": { "type": "string" },
+                        "status": { "type": "string", "enum": ["active"] },
+                        "deploymentStatus": { "type": "string", "enum": ["pending"] },
+                        "contractAddress": { "type": "string", "nullable": true },
+                        "createdAt": { "type": "string", "format": "date-time" }
+                      },
+                      "required": ["id", "title", "shortDescription", "story", "goalAmount", "raisedAmount", "donorCount", "endAt", "imageUrl", "country", "zipCode", "status", "deploymentStatus", "contractAddress", "createdAt"]
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message", "data"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
-          }
+          },
+          "400": { "description": "Missing or invalid Idempotency-Key, or malformed request body." },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "403": { "description": "The authenticated wallet is not a registered fundraiser." },
+          "404": { "description": "The fundraiser profile no longer exists." },
+          "409": { "description": "Idempotency-Key was already used with a different payload." },
+          "422": { "description": "One or more campaign fields are invalid, including an endAt less than five minutes in the future." }
         },
         "parameters": [
           {
@@ -619,23 +644,31 @@
             "name": "Authorization",
             "schema": { "type": "string", "default": "Bearer <jwt>" },
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "description": "Opaque, case-sensitive key scoped to the authenticated fundraiser; 1-255 bytes.",
+            "schema": { "type": "string", "maxLength": 255 },
+            "required": true
           }
         ],
         "operationId": "post_fundraiser-campaigns",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "title": { "type": "string" },
-                  "shortDescription": { "type": "string" },
+                  "title": { "type": "string", "maxLength": 255 },
+                  "shortDescription": { "type": "string", "maxLength": 255 },
                   "story": { "type": "string" },
-                  "goalAmount": { "type": "number" },
-                  "endAt": { "type": "string" },
-                  "imageObjectKey": { "type": "string" },
-                  "country": { "type": "string" },
-                  "zipCode": { "type": "string" }
+                  "goalAmount": { "type": "integer", "format": "int64", "minimum": 1, "description": "Atomic USDC units (6 decimals)." },
+                  "endAt": { "type": "string", "format": "date-time", "description": "Must be at least five minutes in the future." },
+                  "imageObjectKey": { "type": "string", "maxLength": 1024 },
+                  "country": { "type": "string", "maxLength": 255 },
+                  "zipCode": { "type": "string", "maxLength": 20 }
                 },
                 "required": [
                   "title",
@@ -1196,34 +1229,40 @@
         "operationId": "get_supporter-donations"
       }
     },
-    "/fundraiser/campaigns/presign": {
-      "get": {
-        "tags": ["Fundraiser Campaigns"],
+    "/uploads/campaign-image/presign": {
+      "post": {
+        "tags": ["File Uploads"],
         "summary": "Presign Campaign Image Upload",
+        "description": "Generate a presigned URL for a registered fundraiser to upload a campaign image. The resulting object key uses the campaigns/ namespace.",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Campaign image upload presigned successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"] },
+                    "code": { "type": "string", "enum": ["CAMPAIGN_IMAGE_UPLOAD_PRESIGNED"] },
+                    "message": { "type": "string", "default": "Campaign image upload presigned successfully." },
                     "data": {
                       "type": "object",
                       "properties": {
-                        "objectKey": { "type": "string" },
+                        "objectKey": { "type": "string", "default": "campaigns/0198a123-4567-7abc-8123-456789abcdef.jpg" },
                         "url": { "type": "string" }
                       },
                       "required": ["objectKey", "url"]
-                    }
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message", "data"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
-          }
+          },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "403": { "description": "The authenticated wallet is not a registered fundraiser." },
+          "422": { "description": "Unsupported image type or size outside 1-5242880 bytes." }
         },
         "parameters": [
           {
@@ -1233,7 +1272,22 @@
             "required": true
           }
         ],
-        "operationId": "get_campaigns-4"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "contentType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] },
+                  "size": { "type": "integer", "format": "int64", "minimum": 1, "maximum": 5242880 }
+                },
+                "required": ["contentType", "size"]
+              }
+            }
+          }
+        },
+        "operationId": "post_uploads-campaign-image-presign"
       }
     },
     "/uploads/profile-image/presign": {

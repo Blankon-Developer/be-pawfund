@@ -33,6 +33,9 @@ type PresignProfileImageResult struct {
 	URL       string
 }
 
+type PresignCampaignImageInput = PresignProfileImageInput
+type PresignCampaignImageResult = PresignProfileImageResult
+
 type UploadService struct {
 	presigner  ProfileImagePutPresigner
 	generateID IDGenerator
@@ -49,6 +52,22 @@ func (s *UploadService) PresignProfileImage(
 	ctx context.Context,
 	input PresignProfileImageInput,
 ) (PresignProfileImageResult, error) {
+	return s.presignImage(ctx, input, "profiles", "profile")
+}
+
+func (s *UploadService) PresignCampaignImage(
+	ctx context.Context,
+	input PresignCampaignImageInput,
+) (PresignCampaignImageResult, error) {
+	return s.presignImage(ctx, input, "campaigns", "campaign")
+}
+
+func (s *UploadService) presignImage(
+	ctx context.Context,
+	input PresignProfileImageInput,
+	directory string,
+	imageKind string,
+) (PresignProfileImageResult, error) {
 	contentType := strings.ToLower(strings.TrimSpace(input.ContentType))
 	extension, err := profileImageExtension(contentType)
 	if err != nil {
@@ -60,12 +79,12 @@ func (s *UploadService) PresignProfileImage(
 
 	id, err := s.generateID()
 	if err != nil {
-		return PresignProfileImageResult{}, fmt.Errorf("service: generate profile image ID: %w", err)
+		return PresignProfileImageResult{}, fmt.Errorf("service: generate %s image ID: %w", imageKind, err)
 	}
-	objectKey := "profiles/" + id.String() + extension
+	objectKey := directory + "/" + id.String() + extension
 	presignedURL, err := s.presigner.PresignPut(ctx, objectKey, contentType, input.Size)
 	if err != nil {
-		return PresignProfileImageResult{}, fmt.Errorf("service: presign profile image upload: %w", err)
+		return PresignProfileImageResult{}, fmt.Errorf("service: presign %s image upload: %w", imageKind, err)
 	}
 
 	return PresignProfileImageResult{ObjectKey: objectKey, URL: presignedURL}, nil
