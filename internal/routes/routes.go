@@ -51,6 +51,7 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 	)
 
 	router.Get("/v1/fundraiser/{address}", application.FundraiserHandler.HandleGetPublicProfile)
+	router.With(application.Authenticate).Put("/v1/fundraiser/profile", application.FundraiserHandler.HandleReplaceProfile)
 	router.With(application.Authenticate).Get(
 		"/v1/fundraiser/profile",
 		application.FundraiserHandler.HandleGetProfile,

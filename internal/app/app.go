@@ -69,6 +69,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize storage presigner: %w", err))
 	}
+	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
+		Endpoint:  cfg.StorageEndpoint,
+		AccessKey: cfg.StorageAccessKey,
+		SecretKey: cfg.StorageSecretKey,
+		Bucket:    cfg.StorageBucket,
+		Region:    cfg.StorageRegion,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("app: initialize storage object deleter: %w", err))
+	}
 
 	cacheClient, err = cache.Open(ctx, cache.Config{URL: cfg.CacheURL, KeyPrefix: cfg.CacheKeyPrefix})
 	if err != nil {
@@ -80,7 +90,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	authRepository := repository.NewPostgresAuthRepository(db)
 
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
-	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7)
+	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
 	authService := service.NewAuthService(
 		cacheClient,
 		authRepository,

@@ -16,11 +16,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const maxRegisterFundraiserBodyBytes = 1 << 20
+const (
+	maxRegisterFundraiserBodyBytes = 1 << 20
+	maxReplaceFundraiserBodyBytes  = 1 << 20
+)
 
 type FundraiserService interface {
 	Register(ctx context.Context, input service.RegisterFundraiserInput) (domain.Fundraiser, error)
 	GetProfile(ctx context.Context, walletAddress string) (domain.Fundraiser, error)
+	ReplaceProfile(ctx context.Context, input service.ReplaceFundraiserProfileInput) error
 }
 
 type FundraiserHandler struct {
@@ -150,6 +154,58 @@ func (h *FundraiserHandler) HandleGetProfile(w http.ResponseWriter, r *http.Requ
 		WalletAddress: fundraiser.WalletAddress,
 	}
 	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
+}
+
+func (h *FundraiserHandler) HandleReplaceProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	var request replaceFundraiserProfileRequest
+	if err := httpx.ReadJSON(w, r, &request, maxReplaceFundraiserBodyBytes); err != nil {
+		h.ReadError(w, err, "Request body exceeds the 1 MiB limit.")
+		return
+	}
+
+	request.normalize()
+	if fieldErrors := request.validate(); fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
+		return
+	}
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	err := h.service.ReplaceProfile(r.Context(), service.ReplaceFundraiserProfileInput{
+		WalletAddress: walletAddress,
+		Profile:       request.toProfileReplacement(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrProfileNotFound):
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No fundraiser profile is registered for the authenticated wallet.",
+				nil,
+			)
+		default:
+			h.handleServiceError(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *FundraiserHandler) HandleGetPublicProfile(w http.ResponseWriter, r *http.Request) {

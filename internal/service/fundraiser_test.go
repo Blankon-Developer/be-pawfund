@@ -13,10 +13,24 @@ import (
 )
 
 type stubFundraiserRepository struct {
-	create     func(context.Context, domain.Fundraiser) (domain.Fundraiser, error)
-	find       func(context.Context, string) (domain.Fundraiser, bool, error)
-	called     int
-	findCalled int
+	create        func(context.Context, domain.Fundraiser) (domain.Fundraiser, error)
+	find          func(context.Context, string) (domain.Fundraiser, bool, error)
+	replace       func(context.Context, string, domain.FundraiserProfileReplacement) (repository.ReplaceFundraiserProfileResult, bool, error)
+	called        int
+	findCalled    int
+	replaceCalled int
+}
+
+type stubFundraiserObjectDeleter struct {
+	err       error
+	calls     int
+	objectKey string
+}
+
+func (s *stubFundraiserObjectDeleter) Delete(_ context.Context, objectKey string) error {
+	s.calls++
+	s.objectKey = objectKey
+	return s.err
 }
 
 func (s *stubFundraiserRepository) Create(ctx context.Context, fundraiser domain.Fundraiser) (domain.Fundraiser, error) {
@@ -30,6 +44,18 @@ func (s *stubFundraiserRepository) FindByWalletAddress(
 ) (domain.Fundraiser, bool, error) {
 	s.findCalled++
 	return s.find(ctx, walletAddress)
+}
+
+func (s *stubFundraiserRepository) ReplaceProfile(
+	ctx context.Context,
+	walletAddress string,
+	profile domain.FundraiserProfileReplacement,
+) (repository.ReplaceFundraiserProfileResult, bool, error) {
+	s.replaceCalled++
+	if s.replace == nil {
+		return repository.ReplaceFundraiserProfileResult{}, false, nil
+	}
+	return s.replace(ctx, walletAddress, profile)
 }
 
 func TestFundraiserServiceRegister(t *testing.T) {
@@ -235,6 +261,123 @@ func TestFundraiserServiceGetProfile(t *testing.T) {
 			}
 			if repo.findCalled != 1 {
 				t.Errorf("repository calls = %d, want 1", repo.findCalled)
+			}
+		})
+	}
+}
+
+func TestFundraiserServiceReplaceProfile(t *testing.T) {
+	oldImageObjectKey := "profiles/old.png"
+	repositoryFailure := errors.New("repository failure")
+	deleteFailure := errors.New("storage failure")
+
+	tests := []struct {
+		name               string
+		found              bool
+		repositoryError    error
+		deleteError        error
+		replaceResult      repository.ReplaceFundraiserProfileResult
+		wantError          error
+		wantDeleteCall     bool
+		wantRepositoryCall bool
+	}{
+		{
+			name:  "replaces normalized profile and removes old image",
+			found: true,
+			replaceResult: repository.ReplaceFundraiserProfileResult{
+				OldImageObjectKey:  &oldImageObjectKey,
+				DeleteOldImageFile: true,
+			},
+			wantDeleteCall:     true,
+			wantRepositoryCall: true,
+		},
+		{
+			name:  "does not fail after a best effort image delete failure",
+			found: true,
+			replaceResult: repository.ReplaceFundraiserProfileResult{
+				OldImageObjectKey:  &oldImageObjectKey,
+				DeleteOldImageFile: true,
+			},
+			deleteError:        deleteFailure,
+			wantDeleteCall:     true,
+			wantRepositoryCall: true,
+		},
+		{
+			name:               "returns profile not found",
+			wantError:          ErrProfileNotFound,
+			wantRepositoryCall: true,
+		},
+		{
+			name:               "maps duplicate email",
+			found:              true,
+			repositoryError:    repository.ErrEmailAlreadyExists,
+			wantError:          ErrEmailAlreadyRegistered,
+			wantRepositoryCall: true,
+		},
+		{
+			name:               "wraps unexpected repository failure",
+			found:              true,
+			repositoryError:    repositoryFailure,
+			wantError:          repositoryFailure,
+			wantRepositoryCall: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			type contextKey struct{}
+			ctx := context.WithValue(context.Background(), contextKey{}, "request-context")
+			deleter := &stubFundraiserObjectDeleter{err: test.deleteError}
+			repo := &stubFundraiserRepository{
+				replace: func(gotCtx context.Context, walletAddress string, profile domain.FundraiserProfileReplacement) (repository.ReplaceFundraiserProfileResult, bool, error) {
+					if gotCtx.Value(contextKey{}) != "request-context" {
+						t.Error("request context was not propagated")
+					}
+					if walletAddress != "0xWalletChecksum" {
+						t.Errorf("wallet address = %q", walletAddress)
+					}
+					if profile.Name != "Animal Rescue" || profile.Email != "rescue@example.com" || profile.ContactName != "Jane Doe" || profile.ContactPhone != "+62 812 3456" || profile.SocialURL != "https://example.com/rescue" || profile.Country != "Indonesia" || profile.ZipCode != "10110" {
+						t.Errorf("normalized replacement = %#v", profile)
+					}
+					if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/new.png" {
+						t.Errorf("image replacement = %#v", profile)
+					}
+					return test.replaceResult, test.found, test.repositoryError
+				},
+			}
+			fundraiserService := NewFundraiserService(repo, nil, deleter)
+			err := fundraiserService.ReplaceProfile(ctx, ReplaceFundraiserProfileInput{
+				WalletAddress: " 0xWalletChecksum ",
+				Profile: domain.FundraiserProfileReplacement{
+					Name:         " Animal Rescue ",
+					Email:        " RESCUE@EXAMPLE.COM ",
+					ContactName:  " Jane Doe ",
+					ContactPhone: " +62 812 3456 ",
+					SocialURL:    " https://example.com/rescue ",
+					Country:      " Indonesia ",
+					ZipCode:      " 10110 ",
+					ImageObjectKey: domain.ImageObjectKeyUpdate{
+						Set:   true,
+						Value: serviceStringPointer(" profiles/new.png "),
+					},
+				},
+			})
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ReplaceProfile() error = %v, want %v", err, test.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("ReplaceProfile() unexpected error: %v", err)
+			}
+			if (repo.replaceCalled > 0) != test.wantRepositoryCall {
+				t.Errorf("repository calls = %d, want called = %v", repo.replaceCalled, test.wantRepositoryCall)
+			}
+			if (deleter.calls > 0) != test.wantDeleteCall {
+				t.Errorf("delete calls = %d, want called = %v", deleter.calls, test.wantDeleteCall)
+			}
+			if test.wantDeleteCall && deleter.objectKey != oldImageObjectKey {
+				t.Errorf("deleted object = %q, want %q", deleter.objectKey, oldImageObjectKey)
 			}
 		})
 	}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
@@ -27,19 +29,39 @@ type RegisterFundraiserInput struct {
 	ImageObjectKey *string
 }
 
-type FundraiserService struct {
-	repository repository.FundraiserRepository
-	generateID IDGenerator
+type ReplaceFundraiserProfileInput struct {
+	WalletAddress string
+	Profile       domain.FundraiserProfileReplacement
 }
 
-func NewFundraiserService(repo repository.FundraiserRepository, generateID IDGenerator) *FundraiserService {
+// ObjectDeleter removes an object from profile-image storage.
+type ObjectDeleter interface {
+	Delete(ctx context.Context, objectKey string) error
+}
+
+type FundraiserService struct {
+	repository    repository.FundraiserRepository
+	generateID    IDGenerator
+	objectDeleter ObjectDeleter
+}
+
+func NewFundraiserService(
+	repo repository.FundraiserRepository,
+	generateID IDGenerator,
+	objectDeleters ...ObjectDeleter,
+) *FundraiserService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
+	var objectDeleter ObjectDeleter
+	if len(objectDeleters) > 0 {
+		objectDeleter = objectDeleters[0]
+	}
 
 	return &FundraiserService{
-		repository: repo,
-		generateID: generateID,
+		repository:    repo,
+		generateID:    generateID,
+		objectDeleter: objectDeleter,
 	}
 }
 
@@ -93,6 +115,35 @@ func (s *FundraiserService) GetProfile(ctx context.Context, walletAddress string
 	return fundraiser, nil
 }
 
+func (s *FundraiserService) ReplaceProfile(ctx context.Context, input ReplaceFundraiserProfileInput) error {
+	result, found, err := s.repository.ReplaceProfile(
+		ctx,
+		strings.TrimSpace(input.WalletAddress),
+		normalizeFundraiserProfileReplacement(input.Profile),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrEmailAlreadyExists):
+			return ErrEmailAlreadyRegistered
+		default:
+			return fmt.Errorf("service: replace fundraiser profile: %w", err)
+		}
+	}
+	if !found {
+		return ErrProfileNotFound
+	}
+
+	if result.DeleteOldImageFile && result.OldImageObjectKey != nil && s.objectDeleter != nil {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.objectDeleter.Delete(cleanupContext, *result.OldImageObjectKey); err != nil {
+			slog.Warn("delete unreferenced fundraiser profile image", "object_key", *result.OldImageObjectKey, "error", err)
+		}
+	}
+
+	return nil
+}
+
 func normalizeOptionalString(value *string) *string {
 	if value == nil {
 		return nil
@@ -100,6 +151,34 @@ func normalizeOptionalString(value *string) *string {
 	normalized := strings.TrimSpace(*value)
 	if normalized == "" {
 		return nil
+	}
+	return &normalized
+}
+
+func normalizeFundraiserProfileReplacement(
+	profile domain.FundraiserProfileReplacement,
+) domain.FundraiserProfileReplacement {
+	profile.Name = strings.TrimSpace(profile.Name)
+	profile.Email = strings.ToLower(strings.TrimSpace(profile.Email))
+	profile.ContactName = strings.TrimSpace(profile.ContactName)
+	profile.ContactPhone = strings.TrimSpace(profile.ContactPhone)
+	profile.SocialURL = strings.TrimSpace(profile.SocialURL)
+	profile.Country = strings.TrimSpace(profile.Country)
+	profile.ZipCode = strings.TrimSpace(profile.ZipCode)
+	if profile.ImageObjectKey.Set {
+		profile.ImageObjectKey.Value = normalizeProfileString(profile.ImageObjectKey.Value, false)
+	}
+	return profile
+}
+
+func normalizeProfileString(value *string, lowercase bool) *string {
+	if value == nil {
+		return nil
+	}
+
+	normalized := strings.TrimSpace(*value)
+	if lowercase {
+		normalized = strings.ToLower(normalized)
 	}
 	return &normalized
 }

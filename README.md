@@ -269,6 +269,38 @@ must be an absolute HTTP or HTTPS URL. A successful request returns:
 }
 ```
 
+## Update fundraiser profile
+
+`PUT /v1/fundraiser/profile` replaces the fundraiser profile associated with
+the wallet in the access token. Frontends can first call
+`GET /v1/fundraiser/profile`, update the desired values locally, then send the
+complete profile body. The wallet address is never accepted from the request
+body.
+
+```json
+{
+  "name": "Animal Rescue",
+  "email": "new-email@example.com",
+  "contactPerson": {
+    "name": "Jane Doe",
+    "phone": "+62 811 9999"
+  },
+  "socialUrl": "https://example.com/rescue",
+  "country": "Indonesia",
+  "zipCode": "10110"
+}
+```
+
+`name`, `email`, `contactPerson.name`, `contactPerson.phone`, `socialUrl`,
+`country`, and `zipCode` are all required. Supplied strings are trimmed (and
+an email is lowercased) before validation. `imageObjectKey` is optional: omit
+it to preserve the current image, set it to `null` to remove the image, or send
+a new object key to replace it.
+
+On success the endpoint responds with `204 No Content` and no JSON body.
+Missing profiles return `404 PROFILE_NOT_FOUND`; a duplicate email returns
+`409 EMAIL_ALREADY_REGISTERED`; invalid bodies return `422 VALIDATION_ERROR`.
+
 ## Get fundraiser profile
 
 `GET /v1/fundraiser/profile` returns the complete fundraiser profile associated

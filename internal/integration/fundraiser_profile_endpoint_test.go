@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 )
 
 func TestGetFundraiserProfileEndpoint(t *testing.T) {
@@ -264,6 +266,129 @@ func TestGetPublicFundraiserProfileEndpoint(t *testing.T) {
 	}
 }
 
+func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
+	const fundraiserWallet = "0xFundraiserChecksum"
+	oldImageObjectKey := "profiles/fundraiser-update-old.png"
+	newImageObjectKey := "profiles/fundraiser-update-new.png"
+
+	tests := []struct {
+		name          string
+		shareOldImage bool
+		wantOldImage  bool
+	}{
+		{
+			name:         "replaces profile and deletes an unreferenced old image",
+			wantOldImage: false,
+		},
+		{
+			name:          "keeps an old image referenced by a supporter",
+			shareOldImage: true,
+			wantOldImage:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			removeIntegrationObject(t, oldImageObjectKey)
+			removeIntegrationObject(t, newImageObjectKey)
+			t.Cleanup(func() { removeIntegrationObject(t, oldImageObjectKey) })
+			t.Cleanup(func() { removeIntegrationObject(t, newImageObjectKey) })
+			putProfileImageObject(t, oldImageObjectKey)
+			putProfileImageObject(t, newImageObjectKey)
+
+			fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+			mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
+			if test.shareOldImage {
+				supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &oldImageObjectKey))
+			}
+
+			router, jwtManager := newFundraiserProfileIntegrationRouter(t)
+			token, err := jwtManager.Generate(strings.ToLower(fundraiserWallet), "", time.Hour)
+			if err != nil {
+				t.Fatalf("generate access token: %v", err)
+			}
+			request := httptest.NewRequest(
+				http.MethodPut,
+				"/v1/fundraiser/profile",
+				strings.NewReader(`{"name":" Updated Rescue ","email":" updated@example.com ","imageObjectKey":"profiles/fundraiser-update-new.png","contactPerson":{"name":" Updated Contact ","phone":" +62 811 9999 "},"socialUrl":" https://example.com/updated ","country":" Malaysia ","zipCode":" 50450 "}`),
+			)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+				t.Fatalf("PUT = %d body=%q, want 204 with no body", response.Code, response.Body.String())
+			}
+
+			_, err = testStorageClient.StatObject(t.Context(), testStorageBucket, oldImageObjectKey, minio.StatObjectOptions{})
+			if test.wantOldImage && err != nil {
+				t.Errorf("shared old image was deleted: %v", err)
+			}
+			if !test.wantOldImage && err == nil {
+				t.Error("unreferenced old image still exists")
+			}
+
+			getRequest := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/profile", nil)
+			getRequest.Header.Set("Authorization", "Bearer "+token)
+			getResponse := httptest.NewRecorder()
+			router.ServeHTTP(getResponse, getRequest)
+			result := decodeAuthEndpointResult(t, getResponse)
+			if result.HTTPStatus != http.StatusOK || result.Code != "PROFILE_RETRIEVED" {
+				t.Fatalf("GET after PUT = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+			}
+			var data struct {
+				Name          string `json:"name"`
+				Email         string `json:"email"`
+				ContactPerson struct {
+					Name  string `json:"name"`
+					Phone string `json:"phone"`
+				} `json:"contactPerson"`
+				SocialURL string  `json:"socialUrl"`
+				Country   string  `json:"country"`
+				ZipCode   string  `json:"zipCode"`
+				ImageURL  *string `json:"imageUrl"`
+			}
+			if err := json.Unmarshal(result.Data, &data); err != nil {
+				t.Fatalf("decode GET data: %v", err)
+			}
+			if data.Name != "Updated Rescue" || data.Email != "updated@example.com" || data.ContactPerson.Name != "Updated Contact" || data.ContactPerson.Phone != "+62 811 9999" {
+				t.Errorf("replaced fields = %#v", data)
+			}
+			if data.SocialURL != "https://example.com/updated" || data.Country != "Malaysia" || data.ZipCode != "50450" || !equalStringPointers(data.ImageURL, integrationStringPointer("https://cdn.example.com/pawfund/"+newImageObjectKey)) {
+				t.Errorf("replaced fields = %#v", data)
+			}
+		})
+	}
+}
+
+func TestFundraiserProfileReplaceRouteRejectsPatch(t *testing.T) {
+	router, _ := newFundraiserProfileIntegrationRouter(t)
+	request := httptest.NewRequest(http.MethodPatch, "/v1/fundraiser/profile", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PATCH status = %d, want %d; body: %s", response.Code, http.StatusMethodNotAllowed, response.Body.String())
+	}
+}
+
+func putProfileImageObject(t *testing.T, objectKey string) {
+	t.Helper()
+	if _, err := testStorageClient.PutObject(
+		t.Context(),
+		testStorageBucket,
+		objectKey,
+		bytes.NewReader([]byte("profile-image")),
+		int64(len("profile-image")),
+		minio.PutObjectOptions{ContentType: "image/png"},
+	); err != nil {
+		t.Fatalf("put profile image %q: %v", objectKey, err)
+	}
+}
+
 func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -276,7 +401,17 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 		t.Fatalf("create URL builder: %v", err)
 	}
 	fundraiserRepository := repository.NewPostgresFundraiserRepository(testDatabase)
-	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7)
+	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
+		Endpoint:  testStorageEndpoint,
+		AccessKey: testStorageAccessKey,
+		SecretKey: testStorageSecretKey,
+		Bucket:    testStorageBucket,
+		Region:    testStorageRegion,
+	})
+	if err != nil {
+		t.Fatalf("create object deleter: %v", err)
+	}
+	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       api.NewAuthHandler(nil, urlBuilder, logger),

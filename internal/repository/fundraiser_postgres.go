@@ -110,3 +110,104 @@ func (r *PostgresFundraiserRepository) FindByWalletAddress(
 
 	return fundraiser, true, nil
 }
+
+func (r *PostgresFundraiserRepository) ReplaceProfile(
+	ctx context.Context,
+	walletAddress string,
+	profile domain.FundraiserProfileReplacement,
+) (ReplaceFundraiserProfileResult, bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ReplaceFundraiserProfileResult{}, false, fmt.Errorf("repository: begin replace fundraiser profile transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const lockFundraiser = `
+		SELECT u.id, f.image_object_key
+		FROM users u
+		JOIN fundraisers f ON f.id = u.id
+		WHERE u.role = 'fundraiser'
+			AND LOWER(u.wallet_address) = LOWER($1)
+		FOR UPDATE OF u, f
+	`
+
+	var (
+		fundraiser         domain.Fundraiser
+		currentImageObject sql.NullString
+	)
+	if err := tx.QueryRowContext(ctx, lockFundraiser, strings.TrimSpace(walletAddress)).Scan(
+		&fundraiser.ID,
+		&currentImageObject,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ReplaceFundraiserProfileResult{}, false, nil
+		}
+		return ReplaceFundraiserProfileResult{}, false, fmt.Errorf("repository: lock fundraiser profile for replacement: %w", err)
+	}
+
+	const replaceUserEmail = `UPDATE users SET email = $1 WHERE id = $2`
+	if _, err := tx.ExecContext(ctx, replaceUserEmail, profile.Email, fundraiser.ID); err != nil {
+		return ReplaceFundraiserProfileResult{}, false, mapPostgresError("replace fundraiser user email", err)
+	}
+
+	const replaceFundraiser = `
+		UPDATE fundraisers
+		SET name = $1,
+			contact_name = $2,
+			contact_phone = $3,
+			social_url = $4,
+			country = $5,
+			zip_code = $6
+		WHERE id = $7
+	`
+	if _, err := tx.ExecContext(
+		ctx,
+		replaceFundraiser,
+		profile.Name,
+		profile.ContactName,
+		profile.ContactPhone,
+		profile.SocialURL,
+		profile.Country,
+		profile.ZipCode,
+		fundraiser.ID,
+	); err != nil {
+		return ReplaceFundraiserProfileResult{}, false, mapPostgresError("replace fundraiser profile", err)
+	}
+
+	if profile.ImageObjectKey.Set {
+		const replaceImageObjectKey = `UPDATE fundraisers SET image_object_key = $1 WHERE id = $2`
+		if _, err := tx.ExecContext(ctx, replaceImageObjectKey, profile.ImageObjectKey.Value, fundraiser.ID); err != nil {
+			return ReplaceFundraiserProfileResult{}, false, mapPostgresError("replace fundraiser image object key", err)
+		}
+	}
+
+	result := ReplaceFundraiserProfileResult{}
+	if profile.ImageObjectKey.Set && currentImageObject.Valid && imageObjectKeyChanged(currentImageObject.String, profile.ImageObjectKey.Value) {
+		const imageStillReferenced = `
+			SELECT EXISTS (
+				SELECT 1 FROM fundraisers WHERE image_object_key = $1
+				UNION ALL
+				SELECT 1 FROM supporters WHERE image_object_key = $1
+			)
+		`
+		var referenced bool
+		if err := tx.QueryRowContext(ctx, imageStillReferenced, currentImageObject.String).Scan(&referenced); err != nil {
+			return ReplaceFundraiserProfileResult{}, false, fmt.Errorf("repository: check old fundraiser image references: %w", err)
+		}
+		if !referenced {
+			oldImageObjectKey := currentImageObject.String
+			result.OldImageObjectKey = &oldImageObjectKey
+			result.DeleteOldImageFile = true
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ReplaceFundraiserProfileResult{}, false, fmt.Errorf("repository: commit replace fundraiser profile transaction: %w", err)
+	}
+
+	return result, true, nil
+}
+
+func imageObjectKeyChanged(current string, updated *string) bool {
+	return updated == nil || current != *updated
+}

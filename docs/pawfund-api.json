@@ -327,10 +327,16 @@
         ],
         "operationId": "get_fundraiser-profile"
       },
-      "patch": {
+      "put": {
         "tags": ["Fundraiser Profile"],
-        "summary": "Update My Fundraiser Profile",
-        "responses": { "200": { "description": "" } },
+        "summary": "Replace My Fundraiser Profile",
+        "responses": {
+          "204": { "description": "Profile updated successfully. The response has no body." },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "404": { "description": "No fundraiser profile is registered for the authenticated wallet." },
+          "409": { "description": "The requested email address is already registered." },
+          "422": { "description": "One or more required profile fields are missing or invalid." }
+        },
         "parameters": [
           {
             "in": "header",
@@ -340,40 +346,35 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
+                "description": "Send the complete fundraiser profile. imageObjectKey is optional: omit it to keep the current image, set it to null to remove the image, or send a new object key to replace it.",
                 "properties": {
-                  "name": { "type": "string" },
-                  "imageObjectKey": { "type": "string" },
-                  "email": { "type": "string" },
+                  "name": { "type": "string", "description": "Fundraiser name; must not be empty." },
+                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Profile image object key. Use null to remove the current image." },
+                  "email": { "type": "string", "format": "email", "description": "Email address; must not be empty." },
                   "contactPerson": {
                     "type": "object",
+                    "description": "Required contact details.",
                     "properties": {
-                      "name": { "type": "string" },
-                      "phone": { "type": "string" }
+                      "name": { "type": "string", "description": "Contact name; must not be empty when supplied." },
+                      "phone": { "type": "string", "description": "Contact phone; must not be empty when supplied." }
                     },
                     "required": ["name", "phone"]
                   },
-                  "socialUrl": { "type": "string" },
-                  "country": { "type": "string" },
-                  "zipCode": { "type": "string" }
+                  "socialUrl": { "type": "string", "format": "uri", "description": "Required absolute HTTP(S) URL." },
+                  "country": { "type": "string", "description": "Country; must not be empty when supplied." },
+                  "zipCode": { "type": "string", "description": "ZIP or postal code; must not be empty when supplied." }
                 },
-                "required": [
-                  "name",
-                  "imageObjectKey",
-                  "email",
-                  "contactPerson",
-                  "socialUrl",
-                  "country",
-                  "zipCode"
-                ]
+                "required": ["name", "email", "contactPerson", "socialUrl", "country", "zipCode"]
               }
             }
           }
         },
-        "operationId": "patch_fundraiser-profile"
+        "operationId": "put_fundraiser-profile"
       }
     },
     "/fundraiser/campaigns": {
