@@ -46,6 +46,18 @@ func NewCampaignService(repo repository.CampaignRepository, generateID IDGenerat
 	return &CampaignService{repository: repo, generateID: generateID, now: time.Now}
 }
 
+func (s *CampaignService) ListPublicCampaigns(
+	ctx context.Context,
+	options domain.CampaignListOptions,
+) ([]domain.PublicCampaignListItem, error) {
+	options.Search = strings.TrimSpace(options.Search)
+	campaigns, err := s.repository.ListPublic(ctx, options)
+	if err != nil {
+		return nil, fmt.Errorf("service: list public campaigns: %w", err)
+	}
+	return campaigns, nil
+}
+
 func (s *CampaignService) ListMyCampaigns(
 	ctx context.Context,
 	walletAddress string,

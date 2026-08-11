@@ -17,6 +17,7 @@ const (
 type CampaignListSort string
 
 const (
+	CampaignListSortRandom      CampaignListSort = "random"
 	CampaignListSortNewest      CampaignListSort = "newest"
 	CampaignListSortOldest      CampaignListSort = "oldest"
 	CampaignListSortCloseToGoal CampaignListSort = "close-to-goal"
@@ -59,4 +60,11 @@ type Campaign struct {
 	Status           CampaignStatus
 	DeploymentStatus CampaignDeploymentStatus
 	IdempotencyKey   string
+}
+
+// PublicCampaignListItem contains the campaign fields that are safe to expose
+// publicly, together with the optional fundraiser profile image.
+type PublicCampaignListItem struct {
+	Campaign
+	FundraiserImageObjectKey *string
 }

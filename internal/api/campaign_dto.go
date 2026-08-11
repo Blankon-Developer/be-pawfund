@@ -206,3 +206,18 @@ func parsePositiveInt64(value string) (int64, bool) {
 	}
 	return parsed, true
 }
+
+type publicCampaignListItemResponse struct {
+	ID                 uuid.UUID             `json:"id"`
+	Title              string                `json:"title"`
+	ShortDescription   string                `json:"shortDescription"`
+	GoalAmount         int64                 `json:"goalAmount"`
+	RaisedAmount       int64                 `json:"raisedAmount"`
+	DonorCount         int64                 `json:"donorCount"`
+	CampaignImageURL   *string               `json:"campaignImageUrl"`
+	FundraiserImageURL *string               `json:"fundraiserImageUrl"`
+	EndAt              string                `json:"endAt"`
+	CreatedAt          string                `json:"createdAt"`
+	ContractAddress    *string               `json:"contractAddress"`
+	Status             domain.CampaignStatus `json:"status"`
+}

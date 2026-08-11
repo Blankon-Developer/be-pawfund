@@ -21,20 +21,36 @@ import (
 )
 
 type campaignServiceStub struct {
-	created       domain.Campaign
-	err           error
-	calls         int
-	input         service.CreateCampaignInput
-	listed        []domain.Campaign
-	listErr       error
-	listCalls     int
-	listWallet    string
-	listOptions   domain.CampaignListOptions
-	retrieved     domain.Campaign
-	getErr        error
-	getCalls      int
-	getWallet     string
-	getCampaignID uuid.UUID
+	created           domain.Campaign
+	err               error
+	calls             int
+	input             service.CreateCampaignInput
+	listed            []domain.Campaign
+	listErr           error
+	listCalls         int
+	listWallet        string
+	listOptions       domain.CampaignListOptions
+	publicListed      []domain.PublicCampaignListItem
+	publicListErr     error
+	publicListCalls   int
+	publicListOptions domain.CampaignListOptions
+	retrieved         domain.Campaign
+	getErr            error
+	getCalls          int
+	getWallet         string
+	getCampaignID     uuid.UUID
+}
+
+func (s *campaignServiceStub) ListPublicCampaigns(
+	_ context.Context,
+	options domain.CampaignListOptions,
+) ([]domain.PublicCampaignListItem, error) {
+	s.publicListCalls++
+	s.publicListOptions = options
+	if s.publicListErr != nil {
+		return nil, s.publicListErr
+	}
+	return s.publicListed, nil
 }
 
 func (s *campaignServiceStub) Create(
@@ -360,6 +376,135 @@ func TestCampaignHandlerHandleGetMyCampaignList(t *testing.T) {
 			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
 			if data[0].ImageURL == nil || *data[0].ImageURL != wantImageURL {
 				t.Errorf("image URL = %#v, want %q", data[0].ImageURL, wantImageURL)
+			}
+		})
+	}
+}
+
+func TestCampaignHandlerHandleGetPublicCampaignList(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	endAt := createdAt.Add(30 * 24 * time.Hour)
+	contractAddress := "0xCampaign"
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		query        string
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+		wantSort     domain.CampaignListSort
+	}{
+		{
+			name:      "returns public campaigns with randomized default sorting",
+			query:     "?search=+rescue+&filter=completed&page=2&pageSize=25",
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGNS_RETRIEVED",
+			wantCalls: 1,
+			wantSort:  domain.CampaignListSortRandom,
+		},
+		{
+			name:      "treats a blank sort as randomized default sorting",
+			query:     "?sortBy=",
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGNS_RETRIEVED",
+			wantCalls: 1,
+			wantSort:  domain.CampaignListSortRandom,
+		},
+		{
+			name:      "uses explicitly requested sorting",
+			query:     "?sortBy=most-donated",
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGNS_RETRIEVED",
+			wantCalls: 1,
+			wantSort:  domain.CampaignListSortMostDonated,
+		},
+		{
+			name:     "rejects invalid query parameters",
+			query:    "?sortBy=popular&page=0",
+			wantHTTP: http.StatusUnprocessableEntity,
+			wantCode: "VALIDATION_ERROR",
+		},
+		{
+			name:         "hides unexpected service failure",
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+			wantSort:     domain.CampaignListSortRandom,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &campaignServiceStub{
+				publicListed: []domain.PublicCampaignListItem{
+					{
+						Campaign: domain.Campaign{
+							ID:               campaignID,
+							Title:            "Emergency Rescue",
+							ShortDescription: "Help rescued animals",
+							GoalAmount:       10_000_000_000,
+							RaisedAmount:     1_000_000_000,
+							DonorCount:       3,
+							EndAt:            endAt,
+							ImageObjectKey:   "campaigns/rescue photo.png",
+							ContractAddress:  &contractAddress,
+							Status:           domain.CampaignStatusCompleted,
+							CreatedAt:        createdAt,
+						},
+					},
+				},
+				publicListErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewCampaignHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/campaigns"+test.query, nil)
+			response := httptest.NewRecorder()
+
+			handler.HandleGetPublicCampaignList(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if serviceStub.publicListCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.publicListCalls, test.wantCalls)
+			}
+			if test.wantCalls == 0 {
+				return
+			}
+			if serviceStub.publicListOptions.Sort != test.wantSort {
+				t.Errorf("service sort = %q, want %q", serviceStub.publicListOptions.Sort, test.wantSort)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+			if test.name == "returns public campaigns with randomized default sorting" && (serviceStub.publicListOptions.Search != "rescue" || serviceStub.publicListOptions.Status == nil || *serviceStub.publicListOptions.Status != domain.CampaignStatusCompleted || serviceStub.publicListOptions.Page != 2 || serviceStub.publicListOptions.PageSize != 25) {
+				t.Errorf("service options = %#v", serviceStub.publicListOptions)
+			}
+
+			var data []publicCampaignListItemResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode success data: %v", err)
+			}
+			if len(data) != 1 || data[0].ID != campaignID || data[0].GoalAmount != 10_000_000_000 || data[0].DonorCount != 3 || data[0].ContractAddress == nil || *data[0].ContractAddress != contractAddress {
+				t.Errorf("response data = %#v", data)
+			}
+			wantCampaignImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
+			if data[0].CampaignImageURL == nil || *data[0].CampaignImageURL != wantCampaignImageURL || data[0].FundraiserImageURL != nil {
+				t.Errorf("image URLs = %#v", data[0])
 			}
 		})
 	}

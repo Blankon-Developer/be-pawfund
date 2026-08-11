@@ -335,6 +335,151 @@ func TestGetMyCampaignListEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetPublicCampaignListEndpoint(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	fundraiserImageObjectKey := "profiles/public-fundraiser.png"
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiser := newFundraiser("public@example.com", "0xPublicFundraiser", &fundraiserImageObjectKey)
+	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+
+	active := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Emergency Rescue",
+		"Help animals urgently",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusDeployed,
+		100,
+		90,
+		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
+	)
+	completed := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Shelter Supplies",
+		"Mission completed for the shelter",
+		domain.CampaignStatusCompleted,
+		domain.CampaignDeploymentStatusDeployed,
+		100,
+		80,
+		time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC),
+	)
+	cancelled := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Cancelled Intake",
+		"Cancelled campaign",
+		domain.CampaignStatusCancelled,
+		domain.CampaignDeploymentStatusDeployed,
+		50,
+		10,
+		time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+	)
+	mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Pending Deployment",
+		"This campaign must not be visible",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusPending,
+		100,
+		0,
+		time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC),
+	)
+
+	router, _ := newCampaignIntegrationRouter(t)
+	tests := []struct {
+		name       string
+		query      string
+		wantIDs    []uuid.UUID
+		orderedIDs bool
+	}{
+		{
+			name:    "lists only deployed campaigns in randomized default order",
+			wantIDs: []uuid.UUID{active, completed, cancelled},
+		},
+		{name: "searches titles", query: "?search=emergency", wantIDs: []uuid.UUID{active}},
+		{name: "searches short descriptions", query: "?search=mission", wantIDs: []uuid.UUID{completed}},
+		{name: "filters active campaigns", query: "?filter=active", wantIDs: []uuid.UUID{active}},
+		{name: "filters completed campaigns", query: "?filter=completed", wantIDs: []uuid.UUID{completed}},
+		{name: "filters cancelled campaigns", query: "?filter=cancelled", wantIDs: []uuid.UUID{cancelled}},
+		{
+			name:       "sorts by most donated when requested",
+			query:      "?sortBy=most-donated",
+			wantIDs:    []uuid.UUID{active, completed, cancelled},
+			orderedIDs: true,
+		},
+		{
+			name:       "paginates explicit oldest ordering",
+			query:      "?sortBy=oldest&page=2&pageSize=1",
+			wantIDs:    []uuid.UUID{completed},
+			orderedIDs: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := requestPublicCampaignList(t, router, test.query)
+			if response.Code != http.StatusOK {
+				t.Fatalf("list status = %d; body: %s", response.Code, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			var envelope struct {
+				Code string `json:"code"`
+				Data []struct {
+					ID                 uuid.UUID             `json:"id"`
+					CampaignImageURL   *string               `json:"campaignImageUrl"`
+					FundraiserImageURL *string               `json:"fundraiserImageUrl"`
+					ContractAddress    *string               `json:"contractAddress"`
+					Status             domain.CampaignStatus `json:"status"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatalf("decode campaign list response: %v", err)
+			}
+			if envelope.Code != "CAMPAIGNS_RETRIEVED" {
+				t.Errorf("list code = %q", envelope.Code)
+			}
+			if len(envelope.Data) != len(test.wantIDs) {
+				t.Fatalf("campaign count = %d, want %d; data: %#v", len(envelope.Data), len(test.wantIDs), envelope.Data)
+			}
+
+			gotIDs := make([]uuid.UUID, 0, len(envelope.Data))
+			for _, campaign := range envelope.Data {
+				gotIDs = append(gotIDs, campaign.ID)
+			}
+			if test.orderedIDs {
+				for index, wantID := range test.wantIDs {
+					if gotIDs[index] != wantID {
+						t.Errorf("campaign ID at %d = %s, want %s", index, gotIDs[index], wantID)
+					}
+				}
+			} else {
+				gotIDSet := make(map[uuid.UUID]struct{}, len(gotIDs))
+				for _, gotID := range gotIDs {
+					gotIDSet[gotID] = struct{}{}
+				}
+				for _, wantID := range test.wantIDs {
+					if _, found := gotIDSet[wantID]; !found {
+						t.Errorf("campaign IDs = %v, missing %s", gotIDs, wantID)
+					}
+				}
+			}
+
+			if len(envelope.Data) > 0 {
+				campaign := envelope.Data[0]
+				if campaign.CampaignImageURL == nil || *campaign.CampaignImageURL != "https://cdn.example.com/pawfund/campaigns/public-listed-campaign.png" || campaign.FundraiserImageURL == nil || *campaign.FundraiserImageURL != "https://cdn.example.com/pawfund/profiles/public-fundraiser.png" || campaign.ContractAddress == nil || campaign.Status == "" {
+					t.Errorf("public campaign fields = %#v", campaign)
+				}
+			}
+		})
+	}
+}
+
 func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -400,6 +545,18 @@ func requestMyCampaignList(
 	return response
 }
 
+func requestPublicCampaignList(
+	t *testing.T,
+	router http.Handler,
+	query string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns"+query, nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
 func mustCreateListedCampaign(
 	t *testing.T,
 	fundraiserID uuid.UUID,
@@ -435,6 +592,72 @@ func mustCreateListedCampaign(
 		createdAt,
 	); err != nil {
 		t.Fatalf("prepare listed campaign: %v", err)
+	}
+	return campaignID
+}
+
+func mustCreatePublicListedCampaign(
+	t *testing.T,
+	fundraiserID uuid.UUID,
+	title string,
+	shortDescription string,
+	status domain.CampaignStatus,
+	deploymentStatus domain.CampaignDeploymentStatus,
+	goalAmount int64,
+	raisedAmount int64,
+	createdAt time.Time,
+) uuid.UUID {
+	t.Helper()
+
+	var (
+		eventID         any
+		contractAddress any
+	)
+	if deploymentStatus == domain.CampaignDeploymentStatusDeployed {
+		createdEventID := uuid.New()
+		if _, err := testDatabase.ExecContext(
+			t.Context(),
+			`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+			 VALUES ($1, $2, 0, 'campaign_created', 1, $3)`,
+			createdEventID,
+			"0xCampaignCreated"+createdEventID.String(),
+			createdAt,
+		); err != nil {
+			t.Fatalf("prepare campaign blockchain event: %v", err)
+		}
+		eventID = createdEventID
+		contractAddress = "0xCampaign" + createdEventID.String()
+	}
+
+	campaignID := uuid.New()
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO campaigns (
+			id, fundraiser_id, event_id, title, short_description, story,
+			goal_amount, raised_amount, donor_count, contract_address, end_at,
+			image_object_key, country, zip_code, status, deployment_status,
+			idempotency_key, created_at
+		) VALUES (
+			$1, $2, $3, $4, $5, 'Campaign story.',
+			$6, $7, 3, $8, $9,
+			'campaigns/public-listed-campaign.png', 'Indonesia', '10110', $10, $11,
+			$12, $13
+		)`,
+		campaignID,
+		fundraiserID,
+		eventID,
+		title,
+		shortDescription,
+		goalAmount,
+		raisedAmount,
+		contractAddress,
+		createdAt.Add(30*24*time.Hour),
+		status,
+		deploymentStatus,
+		"public-list-"+campaignID.String(),
+		createdAt,
+	); err != nil {
+		t.Fatalf("prepare public listed campaign: %v", err)
 	}
 	return campaignID
 }

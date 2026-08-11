@@ -24,6 +24,7 @@ const (
 
 type CampaignService interface {
 	Create(ctx context.Context, input service.CreateCampaignInput) (domain.Campaign, error)
+	ListPublicCampaigns(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, error)
 	ListMyCampaigns(ctx context.Context, walletAddress string, options domain.CampaignListOptions) ([]domain.Campaign, error)
 	GetMyCampaignDetail(ctx context.Context, walletAddress string, campaignID uuid.UUID) (domain.Campaign, error)
 }
@@ -44,6 +45,47 @@ func NewCampaignHandler(
 		urlBuilder: urlBuilder,
 		Responder:  httpx.NewResponder(logger),
 	}
+}
+
+func (h *CampaignHandler) HandleGetPublicCampaignList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query())
+	if fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
+		return
+	}
+	rawSort, sortSpecified := r.URL.Query()["sortBy"]
+	if !sortSpecified || strings.TrimSpace(firstQueryValue(rawSort)) == "" {
+		options.Sort = domain.CampaignListSortRandom
+	}
+
+	campaigns, err := h.service.ListPublicCampaigns(r.Context(), options)
+	if err != nil {
+		h.Logger.Error("list public campaigns", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := make([]publicCampaignListItemResponse, 0, len(campaigns))
+	for _, campaign := range campaigns {
+		campaignImageObjectKey := campaign.ImageObjectKey
+		response = append(response, publicCampaignListItemResponse{
+			ID:                 campaign.ID,
+			Title:              campaign.Title,
+			ShortDescription:   campaign.ShortDescription,
+			GoalAmount:         campaign.GoalAmount,
+			RaisedAmount:       campaign.RaisedAmount,
+			DonorCount:         campaign.DonorCount,
+			CampaignImageURL:   h.urlBuilder.Build(&campaignImageObjectKey),
+			FundraiserImageURL: h.urlBuilder.Build(campaign.FundraiserImageObjectKey),
+			EndAt:              campaign.EndAt.UTC().Format(time.RFC3339),
+			CreatedAt:          campaign.CreatedAt.UTC().Format(time.RFC3339),
+			ContractAddress:    campaign.ContractAddress,
+			Status:             campaign.Status,
+		})
+	}
+	h.Success(w, http.StatusOK, "CAMPAIGNS_RETRIEVED", "Campaigns retrieved successfully.", response)
 }
 
 func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Request) {

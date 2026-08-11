@@ -17,6 +17,7 @@ var (
 )
 
 type CampaignRepository interface {
+	ListPublic(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, error)
 	ListForFundraiser(
 		ctx context.Context,
 		walletAddress string,

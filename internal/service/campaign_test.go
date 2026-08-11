@@ -13,22 +13,38 @@ import (
 )
 
 type campaignRepositoryStub struct {
-	created      domain.Campaign
-	err          error
-	calls        int
-	wallet       string
-	campaign     domain.Campaign
-	minimumEndAt time.Time
-	listed       []domain.Campaign
-	listErr      error
-	listCalls    int
-	listWallet   string
-	listOptions  domain.CampaignListOptions
-	retrieved    domain.Campaign
-	findErr      error
-	findCalls    int
-	findWallet   string
-	findID       uuid.UUID
+	created           domain.Campaign
+	err               error
+	calls             int
+	wallet            string
+	campaign          domain.Campaign
+	minimumEndAt      time.Time
+	listed            []domain.Campaign
+	listErr           error
+	listCalls         int
+	listWallet        string
+	listOptions       domain.CampaignListOptions
+	publicListed      []domain.PublicCampaignListItem
+	publicListErr     error
+	publicListCalls   int
+	publicListOptions domain.CampaignListOptions
+	retrieved         domain.Campaign
+	findErr           error
+	findCalls         int
+	findWallet        string
+	findID            uuid.UUID
+}
+
+func (s *campaignRepositoryStub) ListPublic(
+	_ context.Context,
+	options domain.CampaignListOptions,
+) ([]domain.PublicCampaignListItem, error) {
+	s.publicListCalls++
+	s.publicListOptions = options
+	if s.publicListErr != nil {
+		return nil, s.publicListErr
+	}
+	return s.publicListed, nil
 }
 
 func (s *campaignRepositoryStub) ListForFundraiser(
@@ -201,6 +217,54 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 			}
 			if repo.listCalls != 1 || repo.listWallet != "0xFundraiser" || repo.listOptions.Search != "rescue" || repo.listOptions.Sort != domain.CampaignListSortMostDonated || repo.listOptions.Status == nil || *repo.listOptions.Status != domain.CampaignStatusActive || repo.listOptions.Page != 2 || repo.listOptions.PageSize != 25 {
 				t.Errorf("repository input = calls:%d wallet:%q options:%#v", repo.listCalls, repo.listWallet, repo.listOptions)
+			}
+			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
+				t.Errorf("campaigns = %#v", campaigns)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceListPublicCampaigns(t *testing.T) {
+	repositoryFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name            string
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns public campaigns"},
+		{name: "wraps repository failure", repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{
+				publicListed:  []domain.PublicCampaignListItem{{Campaign: domain.Campaign{Title: "Emergency Rescue"}}},
+				publicListErr: test.repositoryError,
+			}
+			campaignService := NewCampaignService(repo, nil)
+			options := domain.CampaignListOptions{
+				Search:   " rescue ",
+				Sort:     domain.CampaignListSortRandom,
+				Page:     2,
+				PageSize: 25,
+			}
+
+			campaigns, err := campaignService.ListPublicCampaigns(t.Context(), options)
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ListPublicCampaigns() error = %v, want %v", err, test.wantError)
+				}
+				if !strings.Contains(err.Error(), "list public campaigns") {
+					t.Errorf("ListPublicCampaigns() error lacks operation context: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("ListPublicCampaigns() unexpected error: %v", err)
+			}
+			if repo.publicListCalls != 1 || repo.publicListOptions.Search != "rescue" || repo.publicListOptions.Sort != domain.CampaignListSortRandom || repo.publicListOptions.Page != 2 || repo.publicListOptions.PageSize != 25 {
+				t.Errorf("repository input = calls:%d options:%#v", repo.publicListCalls, repo.publicListOptions)
 			}
 			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
 				t.Errorf("campaigns = %#v", campaigns)

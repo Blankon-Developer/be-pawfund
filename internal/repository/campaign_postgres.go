@@ -20,6 +20,74 @@ func NewPostgresCampaignRepository(db *sql.DB) *PostgresCampaignRepository {
 	return &PostgresCampaignRepository{db: db}
 }
 
+func (r *PostgresCampaignRepository) ListPublic(
+	ctx context.Context,
+	options domain.CampaignListOptions,
+) ([]domain.PublicCampaignListItem, error) {
+	const query = `
+		SELECT
+			c.id,
+			c.fundraiser_id,
+			c.event_id,
+			c.title,
+			c.short_description,
+			c.story,
+			c.goal_amount,
+			c.raised_amount,
+			c.donor_count,
+			c.contract_address,
+			c.created_at,
+			c.end_at,
+			c.image_object_key,
+			c.country,
+			c.zip_code,
+			c.status,
+			c.deployment_status,
+			c.idempotency_key,
+			f.image_object_key
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND c.deployment_status = 'deployed'
+			AND c.contract_address IS NOT NULL
+			AND (
+				$1 = ''
+				OR c.title ILIKE '%' || $1 || '%'
+				OR c.short_description ILIKE '%' || $1 || '%'
+			)
+			AND ($2::campaign_status IS NULL OR c.status = $2::campaign_status)
+	`
+
+	offset := (options.Page - 1) * options.PageSize
+	rows, err := r.db.QueryContext(
+		ctx,
+		query+campaignListOrderBy(options.Sort)+" LIMIT $3 OFFSET $4",
+		options.Search,
+		campaignListStatusArgument(options.Status),
+		options.PageSize,
+		offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list public campaigns: %w", err)
+	}
+	defer rows.Close()
+
+	campaigns := make([]domain.PublicCampaignListItem, 0)
+	for rows.Next() {
+		campaign, err := scanPublicCampaignListItem(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan public campaign list: %w", err)
+		}
+		campaigns = append(campaigns, campaign)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate public campaign list: %w", err)
+	}
+	return campaigns, nil
+}
+
 func (r *PostgresCampaignRepository) ListForFundraiser(
 	ctx context.Context,
 	walletAddress string,
@@ -97,6 +165,8 @@ func campaignListStatusArgument(status *domain.CampaignStatus) any {
 
 func campaignListOrderBy(sort domain.CampaignListSort) string {
 	switch sort {
+	case domain.CampaignListSortRandom:
+		return " ORDER BY RANDOM()"
 	case domain.CampaignListSortOldest:
 		return " ORDER BY c.created_at ASC, c.id ASC"
 	case domain.CampaignListSortCloseToGoal:
@@ -259,6 +329,49 @@ func (r *PostgresCampaignRepository) CreatePending(
 
 type campaignScanner interface {
 	Scan(dest ...any) error
+}
+
+func scanPublicCampaignListItem(scanner campaignScanner) (domain.PublicCampaignListItem, error) {
+	var (
+		item               domain.PublicCampaignListItem
+		eventID            uuid.NullUUID
+		contractAddress    sql.NullString
+		fundraiserImageKey sql.NullString
+	)
+	err := scanner.Scan(
+		&item.ID,
+		&item.FundraiserID,
+		&eventID,
+		&item.Title,
+		&item.ShortDescription,
+		&item.Story,
+		&item.GoalAmount,
+		&item.RaisedAmount,
+		&item.DonorCount,
+		&contractAddress,
+		&item.CreatedAt,
+		&item.EndAt,
+		&item.ImageObjectKey,
+		&item.Country,
+		&item.ZipCode,
+		&item.Status,
+		&item.DeploymentStatus,
+		&item.IdempotencyKey,
+		&fundraiserImageKey,
+	)
+	if err != nil {
+		return domain.PublicCampaignListItem{}, err
+	}
+	if eventID.Valid {
+		item.EventID = &eventID.UUID
+	}
+	if contractAddress.Valid {
+		item.ContractAddress = &contractAddress.String
+	}
+	if fundraiserImageKey.Valid {
+		item.FundraiserImageObjectKey = &fundraiserImageKey.String
+	}
+	return item, nil
 }
 
 func findCampaignByIdempotencyKey(
