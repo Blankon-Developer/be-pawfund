@@ -21,6 +21,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 )
 
 func TestGetSupporterProfileEndpoint(t *testing.T) {
@@ -152,6 +153,83 @@ func TestGetSupporterProfileEndpoint(t *testing.T) {
 	}
 }
 
+func TestReplaceSupporterProfileEndpoint(t *testing.T) {
+	const supporterWallet = "0xSupporterChecksum"
+	oldImageObjectKey := "profiles/supporter-update-old.png"
+	newImageObjectKey := "profiles/supporter-update-new.png"
+
+	tests := []struct {
+		name          string
+		shareOldImage bool
+		wantOldImage  bool
+	}{
+		{name: "replaces profile and deletes an unreferenced old image"},
+		{name: "keeps old image referenced by fundraiser", shareOldImage: true, wantOldImage: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			removeIntegrationObject(t, oldImageObjectKey)
+			removeIntegrationObject(t, newImageObjectKey)
+			t.Cleanup(func() { removeIntegrationObject(t, oldImageObjectKey) })
+			t.Cleanup(func() { removeIntegrationObject(t, newImageObjectKey) })
+			putProfileImageObject(t, oldImageObjectKey)
+			putProfileImageObject(t, newImageObjectKey)
+
+			supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+			mustCreateSupporter(t, supporterRepo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
+			if test.shareOldImage {
+				fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+				mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", "0xFundraiser", &oldImageObjectKey))
+			}
+
+			router, jwtManager := newSupporterProfileIntegrationRouter(t)
+			token, err := jwtManager.Generate(strings.ToLower(supporterWallet), "", time.Hour)
+			if err != nil {
+				t.Fatalf("generate access token: %v", err)
+			}
+			request := httptest.NewRequest(http.MethodPut, "/v1/supporter/profile", strings.NewReader(`{"name":" Updated Cat Lover ","email":" updated@example.com ","imageObjectKey":"profiles/supporter-update-new.png"}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusNoContent || response.Body.Len() != 0 {
+				t.Fatalf("PUT = %d body=%q, want 204 with no body", response.Code, response.Body.String())
+			}
+
+			_, err = testStorageClient.StatObject(t.Context(), testStorageBucket, oldImageObjectKey, minio.StatObjectOptions{})
+			if test.wantOldImage && err != nil {
+				t.Errorf("shared old image was deleted: %v", err)
+			}
+			if !test.wantOldImage && err == nil {
+				t.Error("unreferenced old image still exists")
+			}
+
+			getRequest := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
+			getRequest.Header.Set("Authorization", "Bearer "+token)
+			getResponse := httptest.NewRecorder()
+			router.ServeHTTP(getResponse, getRequest)
+			result := decodeAuthEndpointResult(t, getResponse)
+			if result.HTTPStatus != http.StatusOK || result.Code != "PROFILE_RETRIEVED" {
+				t.Fatalf("GET after PUT = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+			}
+			var data struct {
+				Name     string  `json:"name"`
+				Email    string  `json:"email"`
+				ImageURL *string `json:"imageUrl"`
+			}
+			if err := json.Unmarshal(result.Data, &data); err != nil {
+				t.Fatalf("decode GET data: %v", err)
+			}
+			if data.Name != "Updated Cat Lover" || data.Email != "updated@example.com" || !equalStringPointers(data.ImageURL, integrationStringPointer("https://cdn.example.com/pawfund/"+newImageObjectKey)) {
+				t.Errorf("replaced fields = %#v", data)
+			}
+		})
+	}
+}
+
 func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -164,7 +242,17 @@ func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWT
 		t.Fatalf("create URL builder: %v", err)
 	}
 	supporterRepository := repository.NewPostgresSupporterRepository(testDatabase)
-	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
+	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
+		Endpoint:  testStorageEndpoint,
+		AccessKey: testStorageAccessKey,
+		SecretKey: testStorageSecretKey,
+		Bucket:    testStorageBucket,
+		Region:    testStorageRegion,
+	})
+	if err != nil {
+		t.Fatalf("create object deleter: %v", err)
+	}
+	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       api.NewAuthHandler(nil, urlBuilder, logger),

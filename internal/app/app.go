@@ -91,7 +91,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	campaignRepository := repository.NewPostgresCampaignRepository(db)
 	authRepository := repository.NewPostgresAuthRepository(db)
 
-	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7)
+	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
 	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7)
 	authService := service.NewAuthService(

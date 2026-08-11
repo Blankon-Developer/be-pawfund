@@ -14,11 +14,15 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 )
 
-const maxRegisterSupporterBodyBytes = 1 << 20
+const (
+	maxRegisterSupporterBodyBytes = 1 << 20
+	maxReplaceSupporterBodyBytes  = 1 << 20
+)
 
 type SupporterService interface {
 	Register(ctx context.Context, input service.RegisterSupporterInput) (domain.Supporter, error)
 	GetProfile(ctx context.Context, walletAddress string) (domain.Supporter, error)
+	ReplaceProfile(ctx context.Context, input service.ReplaceSupporterProfileInput) error
 }
 
 type SupporterHandler struct {
@@ -127,6 +131,58 @@ func (h *SupporterHandler) HandleGetProfile(w http.ResponseWriter, r *http.Reque
 		ImageURL:      h.urlBuilder.Build(supporter.ImageObjectKey),
 	}
 	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
+}
+
+func (h *SupporterHandler) HandleReplaceProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	var request replaceSupporterProfileRequest
+	if err := httpx.ReadJSON(w, r, &request, maxReplaceSupporterBodyBytes); err != nil {
+		h.ReadError(w, err, "Request body exceeds the 1 MiB limit.")
+		return
+	}
+
+	request.normalize()
+	if fieldErrors := request.validate(); fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
+		return
+	}
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	err := h.service.ReplaceProfile(r.Context(), service.ReplaceSupporterProfileInput{
+		WalletAddress: walletAddress,
+		Profile:       request.toProfileReplacement(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrProfileNotFound):
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No supporter profile is registered for the authenticated wallet.",
+				nil,
+			)
+		default:
+			h.handleServiceError(w, err)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) {

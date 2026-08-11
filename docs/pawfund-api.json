@@ -1173,10 +1173,16 @@
         ],
         "operationId": "get_supporter-profile"
       },
-      "patch": {
+      "put": {
         "tags": ["Supporter Profile"],
-        "summary": "Update My Supporter Profile",
-        "responses": { "200": { "description": "" } },
+        "summary": "Replace My Supporter Profile",
+        "responses": {
+          "204": { "description": "Profile updated successfully. The response has no body." },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "404": { "description": "No supporter profile is registered for the authenticated wallet." },
+          "409": { "description": "The requested email address is already registered." },
+          "422": { "description": "One or more required profile fields are missing or invalid." }
+        },
         "parameters": [
           {
             "in": "header",
@@ -1186,21 +1192,23 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
+                "description": "Send the complete supporter profile. imageObjectKey is optional: omit it to keep the current image, set it to null to remove the image, or send a new object key to replace it.",
                 "properties": {
-                  "name": { "type": "string" },
-                  "imageObjectKey": { "type": "string" },
-                  "email": { "type": "string" }
+                  "name": { "type": "string", "description": "Supporter name; must not be empty." },
+                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Profile image object key. Use null to remove the current image." },
+                  "email": { "type": "string", "format": "email", "description": "Email address; must not be empty." }
                 },
-                "required": ["name", "imageObjectKey", "email"]
+                "required": ["name", "email"]
               }
             }
           }
         },
-        "operationId": "patch_supporter-profile"
+        "operationId": "put_supporter-profile"
       }
     },
     "/supporter/donations": {

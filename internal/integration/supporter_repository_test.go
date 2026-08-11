@@ -186,6 +186,135 @@ func TestPostgresSupporterRepositoryFindByWalletAddress(t *testing.T) {
 	}
 }
 
+func TestPostgresSupporterRepositoryReplaceProfile(t *testing.T) {
+	const supporterWallet = "0xSupporterChecksum"
+	oldImageObjectKey := "profiles/supporter-old.png"
+	newImageObjectKey := "profiles/supporter-new.png"
+
+	tests := []struct {
+		name          string
+		prepare       func(t *testing.T)
+		walletAddress string
+		profile       domain.SupporterProfileReplacement
+		wantFound     bool
+		wantError     error
+		wantDeleteOld bool
+		assertProfile func(t *testing.T, profile domain.Supporter)
+	}{
+		{
+			name: "replaces every profile field and clears image",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
+			},
+			walletAddress: strings.ToLower(supporterWallet),
+			profile: domain.SupporterProfileReplacement{
+				Name: "Updated Cat Lover", Email: "updated@example.com", ImageObjectKey: domain.ImageObjectKeyUpdate{Set: true},
+			},
+			wantFound:     true,
+			wantDeleteOld: true,
+			assertProfile: func(t *testing.T, profile domain.Supporter) {
+				t.Helper()
+				if profile.Name != "Updated Cat Lover" || profile.Email != "updated@example.com" || profile.ImageObjectKey != nil {
+					t.Errorf("replaced profile = %#v", profile)
+				}
+			},
+		},
+		{
+			name: "does not mark image shared by fundraiser for deletion",
+			prepare: func(t *testing.T) {
+				supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+				fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+				mustCreateSupporter(t, supporterRepo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
+				mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", "0xFundraiser", &oldImageObjectKey))
+			},
+			walletAddress: supporterWallet,
+			profile: domain.SupporterProfileReplacement{
+				Name: "Updated Cat Lover", Email: "updated@example.com", ImageObjectKey: domain.ImageObjectKeyUpdate{Set: true, Value: &newImageObjectKey},
+			},
+			wantFound: true,
+			assertProfile: func(t *testing.T, profile domain.Supporter) {
+				t.Helper()
+				if profile.Name != "Updated Cat Lover" || profile.Email != "updated@example.com" || !equalStringPointers(profile.ImageObjectKey, &newImageObjectKey) {
+					t.Errorf("replaced profile = %#v", profile)
+				}
+			},
+		},
+		{
+			name: "preserves image when replacement omits its key",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
+			},
+			walletAddress: supporterWallet,
+			profile:       domain.SupporterProfileReplacement{Name: "Updated Cat Lover", Email: "updated@example.com"},
+			wantFound:     true,
+			assertProfile: func(t *testing.T, profile domain.Supporter) {
+				t.Helper()
+				if profile.Name != "Updated Cat Lover" || profile.Email != "updated@example.com" || !equalStringPointers(profile.ImageObjectKey, &oldImageObjectKey) {
+					t.Errorf("replacement with preserved image = %#v", profile)
+				}
+			},
+		},
+		{
+			name:          "returns not found for unknown wallet",
+			walletAddress: "0xUnknown",
+			profile:       domain.SupporterProfileReplacement{Name: "New Name", Email: "new@example.com"},
+		},
+		{
+			name: "maps duplicate email constraint",
+			prepare: func(t *testing.T) {
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				mustCreateSupporter(t, repo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
+				mustCreateFundraiser(t, repository.NewPostgresFundraiserRepository(testDatabase), newFundraiser("taken@example.com", "0xFundraiser", nil))
+			},
+			walletAddress: supporterWallet,
+			profile:       domain.SupporterProfileReplacement{Name: "Updated Cat Lover", Email: "taken@example.com"},
+			wantError:     repository.ErrEmailAlreadyExists,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			if test.prepare != nil {
+				test.prepare(t)
+			}
+
+			repo := repository.NewPostgresSupporterRepository(testDatabase)
+			result, found, err := repo.ReplaceProfile(t.Context(), test.walletAddress, test.profile)
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ReplaceProfile() error = %v, want %v", err, test.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReplaceProfile() unexpected error: %v", err)
+			}
+			if found != test.wantFound {
+				t.Fatalf("found = %v, want %v", found, test.wantFound)
+			}
+			if !found {
+				return
+			}
+			if result.DeleteOldImageFile != test.wantDeleteOld {
+				t.Errorf("DeleteOldImageFile = %v, want %v", result.DeleteOldImageFile, test.wantDeleteOld)
+			}
+			if test.wantDeleteOld && !equalStringPointers(result.OldImageObjectKey, &oldImageObjectKey) {
+				t.Errorf("OldImageObjectKey = %v, want %v", result.OldImageObjectKey, &oldImageObjectKey)
+			}
+
+			profile, found, err := repo.FindByWalletAddress(t.Context(), supporterWallet)
+			if err != nil || !found {
+				t.Fatalf("FindByWalletAddress() = %#v, %v, %v", profile, found, err)
+			}
+			test.assertProfile(t, profile)
+		})
+	}
+}
+
 func newSupporter(email, wallet string, imageObjectKey *string) domain.Supporter {
 	return domain.Supporter{
 		User: domain.User{

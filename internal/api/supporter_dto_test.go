@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -98,6 +99,89 @@ func TestRegisterSupporterRequestValidate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := test.request.validate(); !reflect.DeepEqual(got, test.want) {
 				t.Errorf("validate() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReplaceSupporterProfileRequestNormalizeAndValidate(t *testing.T) {
+	var request replaceSupporterProfileRequest
+	if err := json.Unmarshal([]byte(`{
+		"name":" Cat Lover ",
+		"email":" CAT@EXAMPLE.COM ",
+		"imageObjectKey":" profiles/cat.png "
+	}`), &request); err != nil {
+		t.Fatalf("decode replacement request: %v", err)
+	}
+
+	request.normalize()
+	if fieldErrors := request.validate(); fieldErrors != nil {
+		t.Fatalf("validate() = %#v, want nil", fieldErrors)
+	}
+	profile := request.toProfileReplacement()
+	if profile.Name != "Cat Lover" || profile.Email != "cat@example.com" {
+		t.Errorf("replacement profile = %#v", profile)
+	}
+	if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/cat.png" {
+		t.Errorf("image replacement = %#v", profile.ImageObjectKey)
+	}
+}
+
+func TestReplaceSupporterProfileRequestImageModesAndValidation(t *testing.T) {
+	parse := func(t *testing.T, body string) replaceSupporterProfileRequest {
+		t.Helper()
+		var request replaceSupporterProfileRequest
+		if err := json.Unmarshal([]byte(body), &request); err != nil {
+			t.Fatalf("decode replacement request: %v", err)
+		}
+		request.normalize()
+		return request
+	}
+
+	tests := []struct {
+		name           string
+		body           string
+		wantSet        bool
+		wantImage      *string
+		wantFieldError httpx.FieldErrors
+	}{
+		{
+			name:      "preserves image when omitted",
+			body:      `{"name":"Cat Lover","email":"cat@example.com"}`,
+			wantImage: nil,
+		},
+		{
+			name:    "clears image when null",
+			body:    `{"name":"Cat Lover","email":"cat@example.com","imageObjectKey":null}`,
+			wantSet: true,
+		},
+		{
+			name:      "rejects blank image key when set",
+			body:      `{"name":"Cat Lover","email":"cat@example.com","imageObjectKey":" "}`,
+			wantSet:   true,
+			wantImage: stringPointer(""),
+			wantFieldError: httpx.FieldErrors{
+				"imageObjectKey": {"imageObjectKey must not be empty!"},
+			},
+		},
+		{
+			name: "returns all required field errors",
+			body: `{}`,
+			wantFieldError: httpx.FieldErrors{
+				"name":  {"name is required!"},
+				"email": {"email is required!"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := parse(t, test.body)
+			if request.ImageObjectKey.set != test.wantSet || !equalStringPointers(request.ImageObjectKey.value, test.wantImage) {
+				t.Errorf("image update = %#v, want set=%v value=%v", request.ImageObjectKey, test.wantSet, pointerValue(test.wantImage))
+			}
+			if got := request.validate(); !reflect.DeepEqual(got, test.wantFieldError) {
+				t.Errorf("validate() = %#v, want %#v", got, test.wantFieldError)
 			}
 		})
 	}

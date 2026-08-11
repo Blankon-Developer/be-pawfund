@@ -23,10 +23,22 @@ type stubSupporterRegistrar struct {
 	err               error
 	called            int
 	input             service.RegisterSupporterInput
+	replaceErr        error
+	replaceCalls      int
+	replaceInput      service.ReplaceSupporterProfileInput
 	profile           domain.Supporter
 	getProfileErr     error
 	getProfileCalls   int
 	getProfileAddress string
+}
+
+func (s *stubSupporterRegistrar) ReplaceProfile(
+	_ context.Context,
+	input service.ReplaceSupporterProfileInput,
+) error {
+	s.replaceCalls++
+	s.replaceInput = input
+	return s.replaceErr
 }
 
 func (s *stubSupporterRegistrar) Register(
@@ -379,6 +391,108 @@ func TestHandleGetSupporterProfile(t *testing.T) {
 			}
 			if strings.Contains(string(decoded.Data), "imageObjectKey") || strings.Contains(string(decoded.Data), `"role"`) {
 				t.Errorf("response leaks internal fields: %s", decoded.Data)
+			}
+		})
+	}
+}
+
+func TestSupporterHandlerHandleReplaceProfile(t *testing.T) {
+	fullBody := `{"name":" Cat Lover ","email":" CAT@EXAMPLE.COM "}`
+	unexpectedFailure := errors.New("unexpected failure")
+	tests := []struct {
+		name         string
+		body         string
+		wallet       string
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantErrors   httpx.FieldErrors
+		wantCall     bool
+		assertInput  func(t *testing.T, input service.ReplaceSupporterProfileInput)
+	}{
+		{
+			name:     "replaces profile and clears explicit image",
+			body:     strings.TrimSuffix(fullBody, "}") + `,"imageObjectKey":null}`,
+			wallet:   "0xWalletChecksum",
+			wantHTTP: http.StatusNoContent,
+			wantCall: true,
+			assertInput: func(t *testing.T, input service.ReplaceSupporterProfileInput) {
+				t.Helper()
+				if input.WalletAddress != "0xWalletChecksum" || input.Profile.Name != "Cat Lover" || input.Profile.Email != "cat@example.com" {
+					t.Errorf("replacement input = %#v", input)
+				}
+				if !input.Profile.ImageObjectKey.Set || input.Profile.ImageObjectKey.Value != nil {
+					t.Errorf("image update = %#v", input.Profile.ImageObjectKey)
+				}
+			},
+		},
+		{
+			name:     "preserves image when omitted",
+			body:     fullBody,
+			wallet:   "0xWalletChecksum",
+			wantHTTP: http.StatusNoContent,
+			wantCall: true,
+			assertInput: func(t *testing.T, input service.ReplaceSupporterProfileInput) {
+				t.Helper()
+				if input.Profile.ImageObjectKey.Set {
+					t.Errorf("image update = %#v, want omitted", input.Profile.ImageObjectKey)
+				}
+			},
+		},
+		{
+			name:       "requires profile fields",
+			body:       `{}`,
+			wallet:     "0xWalletChecksum",
+			wantHTTP:   http.StatusUnprocessableEntity,
+			wantCode:   "VALIDATION_ERROR",
+			wantErrors: httpx.FieldErrors{"name": {"name is required!"}, "email": {"email is required!"}},
+		},
+		{name: "rejects client supplied wallet address", body: strings.TrimSuffix(fullBody, "}") + `,"walletAddress":"0xSpoofed"}`, wallet: "0xWalletChecksum", wantHTTP: http.StatusBadRequest, wantCode: "INVALID_REQUEST"},
+		{name: "requires authenticated principal", body: fullBody, wantHTTP: http.StatusUnauthorized, wantCode: "INVALID_ACCESS_TOKEN"},
+		{name: "maps missing profile", body: fullBody, wallet: "0xWalletChecksum", serviceError: service.ErrProfileNotFound, wantHTTP: http.StatusNotFound, wantCode: "PROFILE_NOT_FOUND", wantCall: true},
+		{name: "maps duplicate email", body: fullBody, wallet: "0xWalletChecksum", serviceError: service.ErrEmailAlreadyRegistered, wantHTTP: http.StatusConflict, wantCode: "EMAIL_ALREADY_REGISTERED", wantErrors: httpx.FieldErrors{"email": {"email is already registered!"}}, wantCall: true},
+		{name: "hides unexpected service error", body: fullBody, wallet: "0xWalletChecksum", serviceError: unexpectedFailure, wantHTTP: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR", wantCall: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &stubSupporterRegistrar{replaceErr: test.serviceError}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodPut, "/v1/supporter/profile", strings.NewReader(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			if test.wallet != "" {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), auth.Principal{WalletAddress: test.wallet}))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleReplaceProfile(response, request)
+
+			if response.Code != test.wantHTTP {
+				t.Fatalf("HTTP status = %d, want %d; body: %s", response.Code, test.wantHTTP, response.Body.String())
+			}
+			if (serviceStub.replaceCalls > 0) != test.wantCall {
+				t.Errorf("service calls = %d, want called = %v", serviceStub.replaceCalls, test.wantCall)
+			}
+			if test.wantHTTP == http.StatusNoContent {
+				if response.Body.Len() != 0 {
+					t.Errorf("204 body = %q, want empty", response.Body.String())
+				}
+				if test.assertInput != nil {
+					test.assertInput(t, serviceStub.replaceInput)
+				}
+				return
+			}
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if decoded.Code != test.wantCode || !reflect.DeepEqual(decoded.Errors, test.wantErrors) {
+				t.Errorf("response = %q/%#v, want %q/%#v", decoded.Code, decoded.Errors, test.wantCode, test.wantErrors)
 			}
 		})
 	}

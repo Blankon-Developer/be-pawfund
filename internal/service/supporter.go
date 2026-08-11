@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
@@ -18,19 +20,34 @@ type RegisterSupporterInput struct {
 	ImageObjectKey *string
 }
 
-type SupporterService struct {
-	repository repository.SupporterRepository
-	generateID IDGenerator
+type ReplaceSupporterProfileInput struct {
+	WalletAddress string
+	Profile       domain.SupporterProfileReplacement
 }
 
-func NewSupporterService(repo repository.SupporterRepository, generateID IDGenerator) *SupporterService {
+type SupporterService struct {
+	repository    repository.SupporterRepository
+	generateID    IDGenerator
+	objectDeleter ObjectDeleter
+}
+
+func NewSupporterService(
+	repo repository.SupporterRepository,
+	generateID IDGenerator,
+	objectDeleters ...ObjectDeleter,
+) *SupporterService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
+	var objectDeleter ObjectDeleter
+	if len(objectDeleters) > 0 {
+		objectDeleter = objectDeleters[0]
+	}
 
 	return &SupporterService{
-		repository: repo,
-		generateID: generateID,
+		repository:    repo,
+		generateID:    generateID,
+		objectDeleter: objectDeleter,
 	}
 }
 
@@ -48,7 +65,7 @@ func (s *SupporterService) Register(ctx context.Context, input RegisterSupporter
 			WalletAddress: strings.TrimSpace(input.WalletAddress),
 		},
 		Name:           strings.TrimSpace(input.Name),
-		ImageObjectKey: input.ImageObjectKey,
+		ImageObjectKey: normalizeOptionalString(input.ImageObjectKey),
 	}
 
 	created, err := s.repository.Create(ctx, supporter)
@@ -76,4 +93,44 @@ func (s *SupporterService) GetProfile(ctx context.Context, walletAddress string)
 	}
 
 	return supporter, nil
+}
+
+func (s *SupporterService) ReplaceProfile(ctx context.Context, input ReplaceSupporterProfileInput) error {
+	result, found, err := s.repository.ReplaceProfile(
+		ctx,
+		strings.TrimSpace(input.WalletAddress),
+		normalizeSupporterProfileReplacement(input.Profile),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrEmailAlreadyExists):
+			return ErrEmailAlreadyRegistered
+		default:
+			return fmt.Errorf("service: replace supporter profile: %w", err)
+		}
+	}
+	if !found {
+		return ErrProfileNotFound
+	}
+
+	if result.DeleteOldImageFile && result.OldImageObjectKey != nil && s.objectDeleter != nil {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.objectDeleter.Delete(cleanupContext, *result.OldImageObjectKey); err != nil {
+			slog.Warn("delete unreferenced supporter profile image", "object_key", *result.OldImageObjectKey, "error", err)
+		}
+	}
+
+	return nil
+}
+
+func normalizeSupporterProfileReplacement(
+	profile domain.SupporterProfileReplacement,
+) domain.SupporterProfileReplacement {
+	profile.Name = strings.TrimSpace(profile.Name)
+	profile.Email = strings.ToLower(strings.TrimSpace(profile.Email))
+	if profile.ImageObjectKey.Set {
+		profile.ImageObjectKey.Value = normalizeProfileString(profile.ImageObjectKey.Value, false)
+	}
+	return profile
 }
