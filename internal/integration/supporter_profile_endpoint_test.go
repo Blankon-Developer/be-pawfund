@@ -230,6 +230,113 @@ func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeleteSupporterProfileEndpoint(t *testing.T) {
+	const supporterWallet = "0xSupporterChecksum"
+	imageObjectKey := "profiles/supporter-delete.png"
+
+	tests := []struct {
+		name            string
+		createProfile   bool
+		shareImage      bool
+		authorization   string
+		wantHTTP        int
+		wantCode        string
+		wantImageExists *bool
+	}{
+		{
+			name:            "deletes profile and its unreferenced image",
+			createProfile:   true,
+			wantHTTP:        http.StatusNoContent,
+			wantImageExists: integrationBoolPointer(false),
+		},
+		{
+			name:            "keeps a shared image",
+			createProfile:   true,
+			shareImage:      true,
+			wantHTTP:        http.StatusNoContent,
+			wantImageExists: integrationBoolPointer(true),
+		},
+		{name: "returns not found for unknown wallet", wantHTTP: http.StatusNotFound, wantCode: "PROFILE_NOT_FOUND"},
+		{name: "requires access token", authorization: "missing", wantHTTP: http.StatusUnauthorized, wantCode: "ACCESS_TOKEN_REQUIRED"},
+		{name: "rejects invalid access token", authorization: "invalid", wantHTTP: http.StatusUnauthorized, wantCode: "INVALID_ACCESS_TOKEN"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanDatabase(t)
+			t.Cleanup(func() { cleanDatabase(t) })
+			removeIntegrationObject(t, imageObjectKey)
+			t.Cleanup(func() { removeIntegrationObject(t, imageObjectKey) })
+
+			if test.createProfile {
+				putProfileImageObject(t, imageObjectKey)
+				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				supporter := newSupporter("supporter@example.com", supporterWallet, &imageObjectKey)
+				mustCreateSupporter(t, repo, supporter)
+				if test.shareImage {
+					fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+					mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", "0xFundraiser", &imageObjectKey))
+				}
+			}
+
+			router, jwtManager := newSupporterProfileIntegrationRouter(t)
+			request := httptest.NewRequest(http.MethodDelete, "/v1/supporter/profile", nil)
+			switch test.authorization {
+			case "missing":
+			case "invalid":
+				request.Header.Set("Authorization", "Bearer invalid-token")
+			default:
+				token, err := jwtManager.Generate(strings.ToLower(supporterWallet), "", time.Hour)
+				if err != nil {
+					t.Fatalf("generate access token: %v", err)
+				}
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			if response.Code != test.wantHTTP {
+				t.Fatalf("DELETE = %d, want %d; body: %s", response.Code, test.wantHTTP, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusNoContent {
+				if response.Body.Len() != 0 {
+					t.Errorf("204 body = %q, want empty", response.Body.String())
+				}
+			} else {
+				result := decodeAuthEndpointResult(t, response)
+				if result.Code != test.wantCode {
+					t.Errorf("response code = %q, want %q; body: %s", result.Code, test.wantCode, result.Body)
+				}
+			}
+
+			if test.wantImageExists != nil {
+				_, err := testStorageClient.StatObject(t.Context(), testStorageBucket, imageObjectKey, minio.StatObjectOptions{})
+				if *test.wantImageExists && err != nil {
+					t.Errorf("profile image was deleted: %v", err)
+				}
+				if !*test.wantImageExists && err == nil {
+					t.Error("unreferenced profile image still exists")
+				}
+			}
+
+			if test.wantHTTP != http.StatusNoContent {
+				return
+			}
+			profileRequest := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
+			profileRequest.Header.Set("Authorization", request.Header.Get("Authorization"))
+			profileResponse := httptest.NewRecorder()
+			router.ServeHTTP(profileResponse, profileRequest)
+			profileResult := decodeAuthEndpointResult(t, profileResponse)
+			if profileResult.HTTPStatus != http.StatusNotFound || profileResult.Code != "PROFILE_NOT_FOUND" {
+				t.Errorf("GET own profile after delete = %d/%q; body: %s", profileResult.HTTPStatus, profileResult.Code, profileResult.Body)
+			}
+		})
+	}
+}
+
 func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

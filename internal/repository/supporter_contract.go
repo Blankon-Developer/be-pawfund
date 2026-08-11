@@ -20,6 +20,7 @@ type SupporterRepository interface {
 		walletAddress string,
 		profile domain.SupporterProfileReplacement,
 	) (ReplaceSupporterProfileResult, bool, error)
+	DeleteProfile(ctx context.Context, walletAddress string) (DeleteSupporterProfileResult, bool, error)
 }
 
 // ReplaceSupporterProfileResult describes storage cleanup that is safe after a
@@ -27,4 +28,11 @@ type SupporterRepository interface {
 type ReplaceSupporterProfileResult struct {
 	OldImageObjectKey  *string
 	DeleteOldImageFile bool
+}
+
+// DeleteSupporterProfileResult describes storage cleanup that is safe after a
+// successful profile-deletion transaction commits.
+type DeleteSupporterProfileResult struct {
+	ImageObjectKey        *string
+	DeleteImageObjectFile bool
 }

@@ -26,6 +26,9 @@ type stubSupporterRegistrar struct {
 	replaceErr        error
 	replaceCalls      int
 	replaceInput      service.ReplaceSupporterProfileInput
+	deleteErr         error
+	deleteCalls       int
+	deleteAddress     string
 	profile           domain.Supporter
 	getProfileErr     error
 	getProfileCalls   int
@@ -39,6 +42,12 @@ func (s *stubSupporterRegistrar) ReplaceProfile(
 	s.replaceCalls++
 	s.replaceInput = input
 	return s.replaceErr
+}
+
+func (s *stubSupporterRegistrar) DeleteProfile(_ context.Context, walletAddress string) error {
+	s.deleteCalls++
+	s.deleteAddress = walletAddress
+	return s.deleteErr
 }
 
 func (s *stubSupporterRegistrar) Register(
@@ -493,6 +502,68 @@ func TestSupporterHandlerHandleReplaceProfile(t *testing.T) {
 			}
 			if decoded.Code != test.wantCode || !reflect.DeepEqual(decoded.Errors, test.wantErrors) {
 				t.Errorf("response = %q/%#v, want %q/%#v", decoded.Code, decoded.Errors, test.wantCode, test.wantErrors)
+			}
+		})
+	}
+}
+
+func TestSupporterHandlerHandleDeleteProfile(t *testing.T) {
+	unexpectedFailure := errors.New("unexpected failure")
+	tests := []struct {
+		name          string
+		walletAddress string
+		serviceError  error
+		wantHTTP      int
+		wantCode      string
+		wantCall      bool
+	}{
+		{name: "deletes the authenticated profile", walletAddress: " 0xWalletChecksum ", wantHTTP: http.StatusNoContent, wantCall: true},
+		{name: "requires authenticated principal", wantHTTP: http.StatusUnauthorized, wantCode: "INVALID_ACCESS_TOKEN"},
+		{name: "maps missing profile", walletAddress: "0xWalletChecksum", serviceError: service.ErrProfileNotFound, wantHTTP: http.StatusNotFound, wantCode: "PROFILE_NOT_FOUND", wantCall: true},
+		{name: "hides unexpected service error", walletAddress: "0xWalletChecksum", serviceError: unexpectedFailure, wantHTTP: http.StatusInternalServerError, wantCode: "INTERNAL_SERVER_ERROR", wantCall: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			serviceStub := &stubSupporterRegistrar{deleteErr: test.serviceError}
+			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodDelete, "/v1/supporter/profile", nil)
+			if test.walletAddress != "" {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), auth.Principal{WalletAddress: test.walletAddress}))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleDeleteProfile(response, request)
+
+			if response.Code != test.wantHTTP {
+				t.Fatalf("HTTP status = %d, want %d; body: %s", response.Code, test.wantHTTP, response.Body.String())
+			}
+			if (serviceStub.deleteCalls > 0) != test.wantCall {
+				t.Errorf("service calls = %d, want called = %v", serviceStub.deleteCalls, test.wantCall)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP == http.StatusNoContent {
+				if response.Body.Len() != 0 {
+					t.Errorf("204 body = %q, want empty", response.Body.String())
+				}
+				if serviceStub.deleteAddress != "0xWalletChecksum" {
+					t.Errorf("wallet address = %q, want normalized authenticated wallet", serviceStub.deleteAddress)
+				}
+				return
+			}
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if decoded.Code != test.wantCode {
+				t.Errorf("response code = %q, want %q", decoded.Code, test.wantCode)
 			}
 		})
 	}

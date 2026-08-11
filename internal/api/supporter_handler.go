@@ -23,6 +23,7 @@ type SupporterService interface {
 	Register(ctx context.Context, input service.RegisterSupporterInput) (domain.Supporter, error)
 	GetProfile(ctx context.Context, walletAddress string) (domain.Supporter, error)
 	ReplaceProfile(ctx context.Context, input service.ReplaceSupporterProfileInput) error
+	DeleteProfile(ctx context.Context, walletAddress string) error
 }
 
 type SupporterHandler struct {
@@ -179,6 +180,44 @@ func (h *SupporterHandler) HandleReplaceProfile(w http.ResponseWriter, r *http.R
 		default:
 			h.handleServiceError(w, err)
 		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *SupporterHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+
+	err := h.service.DeleteProfile(r.Context(), walletAddress)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No supporter profile is registered for the authenticated wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("delete supporter profile", "error", err)
+		h.InternalError(w)
 		return
 	}
 

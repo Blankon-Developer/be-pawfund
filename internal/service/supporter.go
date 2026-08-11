@@ -124,6 +124,26 @@ func (s *SupporterService) ReplaceProfile(ctx context.Context, input ReplaceSupp
 	return nil
 }
 
+func (s *SupporterService) DeleteProfile(ctx context.Context, walletAddress string) error {
+	result, found, err := s.repository.DeleteProfile(ctx, strings.TrimSpace(walletAddress))
+	if err != nil {
+		return fmt.Errorf("service: delete supporter profile: %w", err)
+	}
+	if !found {
+		return ErrProfileNotFound
+	}
+
+	if result.DeleteImageObjectFile && result.ImageObjectKey != nil && s.objectDeleter != nil {
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.objectDeleter.Delete(cleanupContext, *result.ImageObjectKey); err != nil {
+			slog.Warn("delete supporter profile image", "object_key", *result.ImageObjectKey, "error", err)
+		}
+	}
+
+	return nil
+}
+
 func normalizeSupporterProfileReplacement(
 	profile domain.SupporterProfileReplacement,
 ) domain.SupporterProfileReplacement {

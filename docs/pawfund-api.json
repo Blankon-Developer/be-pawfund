@@ -1209,6 +1209,25 @@
           }
         },
         "operationId": "put_supporter-profile"
+      },
+      "delete": {
+        "tags": ["Supporter Profile"],
+        "summary": "Delete My Supporter Profile",
+        "description": "Soft-deletes the authenticated supporter profile. Donation history is retained.",
+        "responses": {
+          "204": { "description": "Profile deleted successfully. The response has no body." },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "404": { "description": "No supporter profile is registered for the authenticated wallet." }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": { "type": "string", "default": "Bearer {token}" },
+            "required": true
+          }
+        ],
+        "operationId": "delete_supporter-profile"
       }
     },
     "/supporter/donations": {
@@ -1445,28 +1464,6 @@
           }
         },
         "operationId": "post_uploads-profile-image-presign"
-      }
-    },
-    "/supporter/profile/{address}/delete": {
-      "delete": {
-        "tags": ["Supporter Profile"],
-        "summary": "Delete Supporter Profile",
-        "responses": { "200": { "description": "" } },
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Authorization",
-            "schema": { "type": "string", "default": "Bearer {token}" },
-            "required": true
-          },
-          {
-            "in": "path",
-            "name": "address",
-            "schema": { "type": "string" },
-            "required": true
-          }
-        ],
-        "operationId": "delete_supporter-profile-address-delete"
       }
     },
     "/register/supporter": {

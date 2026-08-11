@@ -192,6 +192,83 @@ func (r *PostgresSupporterRepository) ReplaceProfile(
 	return result, true, nil
 }
 
+func (r *PostgresSupporterRepository) DeleteProfile(
+	ctx context.Context,
+	walletAddress string,
+) (DeleteSupporterProfileResult, bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: begin delete supporter profile transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const lockSupporter = `
+		SELECT u.id, s.image_object_key
+		FROM users u
+		JOIN supporters s ON s.id = u.id
+		WHERE u.role = 'supporter'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
+		FOR UPDATE OF u, s
+	`
+
+	var (
+		supporterID        string
+		currentImageObject sql.NullString
+	)
+	if err := tx.QueryRowContext(ctx, lockSupporter, strings.TrimSpace(walletAddress)).Scan(
+		&supporterID,
+		&currentImageObject,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DeleteSupporterProfileResult{}, false, nil
+		}
+		return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: lock supporter profile for deletion: %w", err)
+	}
+
+	const clearSupporterImage = `UPDATE supporters SET image_object_key = NULL WHERE id = $1`
+	if _, err := tx.ExecContext(ctx, clearSupporterImage, supporterID); err != nil {
+		return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: clear supporter profile image: %w", err)
+	}
+
+	const softDeleteUser = `UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`
+	if _, err := tx.ExecContext(ctx, softDeleteUser, supporterID); err != nil {
+		return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: soft delete supporter profile: %w", err)
+	}
+
+	result := DeleteSupporterProfileResult{}
+	if currentImageObject.Valid {
+		const imageStillReferenced = `
+			SELECT EXISTS (
+				SELECT 1
+				FROM fundraisers f
+				JOIN users u ON u.id = f.id
+				WHERE f.image_object_key = $1 AND u.deleted_at IS NULL
+				UNION ALL
+				SELECT 1
+				FROM supporters s
+				JOIN users u ON u.id = s.id
+				WHERE s.image_object_key = $1 AND u.deleted_at IS NULL
+			)
+		`
+		var referenced bool
+		if err := tx.QueryRowContext(ctx, imageStillReferenced, currentImageObject.String).Scan(&referenced); err != nil {
+			return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: check deleted supporter image references: %w", err)
+		}
+		if !referenced {
+			imageObjectKey := currentImageObject.String
+			result.ImageObjectKey = &imageObjectKey
+			result.DeleteImageObjectFile = true
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return DeleteSupporterProfileResult{}, false, fmt.Errorf("repository: commit delete supporter profile transaction: %w", err)
+	}
+
+	return result, true, nil
+}
+
 func mapPostgresError(operation string, err error) error {
 	var postgresError *pgconn.PgError
 	if errors.As(err, &postgresError) {
