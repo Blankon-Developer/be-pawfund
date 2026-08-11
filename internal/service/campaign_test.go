@@ -28,6 +28,10 @@ type campaignRepositoryStub struct {
 	publicListErr     error
 	publicListCalls   int
 	publicListOptions domain.CampaignListOptions
+	publicRetrieved   domain.PublicCampaignDetail
+	publicFindErr     error
+	publicFindCalls   int
+	publicAddress     string
 	retrieved         domain.Campaign
 	findErr           error
 	findCalls         int
@@ -45,6 +49,18 @@ func (s *campaignRepositoryStub) ListPublic(
 		return nil, s.publicListErr
 	}
 	return s.publicListed, nil
+}
+
+func (s *campaignRepositoryStub) FindPublicByContractAddress(
+	_ context.Context,
+	contractAddress string,
+) (domain.PublicCampaignDetail, error) {
+	s.publicFindCalls++
+	s.publicAddress = contractAddress
+	if s.publicFindErr != nil {
+		return domain.PublicCampaignDetail{}, s.publicFindErr
+	}
+	return s.publicRetrieved, nil
 }
 
 func (s *campaignRepositoryStub) ListForFundraiser(
@@ -268,6 +284,49 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 			}
 			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
 				t.Errorf("campaigns = %#v", campaigns)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceGetPublicCampaignDetail(t *testing.T) {
+	repositoryFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name            string
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns the public campaign"},
+		{name: "maps campaign not found", repositoryError: repository.ErrCampaignNotFound, wantError: ErrCampaignNotFound},
+		{name: "wraps repository failure", repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{
+				publicRetrieved: domain.PublicCampaignDetail{Campaign: domain.Campaign{Title: "Emergency Rescue"}},
+				publicFindErr:   test.repositoryError,
+			}
+			campaignService := NewCampaignService(repo, nil)
+
+			campaign, err := campaignService.GetPublicCampaignDetail(t.Context(), " 0xCaMpAiGn ")
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("GetPublicCampaignDetail() error = %v, want %v", err, test.wantError)
+				}
+				if test.repositoryError == repositoryFailure && !strings.Contains(err.Error(), "get public campaign detail") {
+					t.Errorf("GetPublicCampaignDetail() error lacks operation context: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("GetPublicCampaignDetail() unexpected error: %v", err)
+			}
+			if repo.publicFindCalls != 1 || repo.publicAddress != "0xCaMpAiGn" {
+				t.Errorf("repository input = calls:%d address:%q", repo.publicFindCalls, repo.publicAddress)
+			}
+			if test.wantError == nil && campaign.Title != "Emergency Rescue" {
+				t.Errorf("campaign = %#v", campaign)
 			}
 		})
 	}

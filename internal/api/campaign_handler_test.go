@@ -34,6 +34,10 @@ type campaignServiceStub struct {
 	publicListErr     error
 	publicListCalls   int
 	publicListOptions domain.CampaignListOptions
+	publicRetrieved   domain.PublicCampaignDetail
+	publicGetErr      error
+	publicGetCalls    int
+	publicAddress     string
 	retrieved         domain.Campaign
 	getErr            error
 	getCalls          int
@@ -51,6 +55,18 @@ func (s *campaignServiceStub) ListPublicCampaigns(
 		return nil, s.publicListErr
 	}
 	return s.publicListed, nil
+}
+
+func (s *campaignServiceStub) GetPublicCampaignDetail(
+	_ context.Context,
+	contractAddress string,
+) (domain.PublicCampaignDetail, error) {
+	s.publicGetCalls++
+	s.publicAddress = contractAddress
+	if s.publicGetErr != nil {
+		return domain.PublicCampaignDetail{}, s.publicGetErr
+	}
+	return s.publicRetrieved, nil
 }
 
 func (s *campaignServiceStub) Create(
@@ -505,6 +521,120 @@ func TestCampaignHandlerHandleGetPublicCampaignList(t *testing.T) {
 			wantCampaignImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
 			if data[0].CampaignImageURL == nil || *data[0].CampaignImageURL != wantCampaignImageURL || data[0].FundraiserImageURL != nil {
 				t.Errorf("image URLs = %#v", data[0])
+			}
+		})
+	}
+}
+
+func TestCampaignHandlerHandleGetPublicCampaignDetail(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	fundraiserID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdee")
+	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	endAt := createdAt.Add(30 * 24 * time.Hour)
+	contractAddress := "0xCampaign"
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		address      string
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+	}{
+		{
+			name:      "returns a public deployed campaign",
+			address:   " 0xCaMpAiGn ",
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGN_RETRIEVED",
+			wantCalls: 1,
+		},
+		{
+			name:         "maps a missing campaign",
+			address:      contractAddress,
+			serviceError: service.ErrCampaignNotFound,
+			wantHTTP:     http.StatusNotFound,
+			wantCode:     "CAMPAIGN_NOT_FOUND",
+			wantCalls:    1,
+		},
+		{
+			name:         "hides unexpected service failure",
+			address:      contractAddress,
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &campaignServiceStub{
+				publicRetrieved: domain.PublicCampaignDetail{
+					Campaign: domain.Campaign{
+						ID:               campaignID,
+						FundraiserID:     fundraiserID,
+						Title:            "Emergency Rescue",
+						ShortDescription: "Help rescued animals",
+						Story:            "A long rescue story.",
+						GoalAmount:       10_000_000_000,
+						RaisedAmount:     100_000_000,
+						DonorCount:       3,
+						ContractAddress:  &contractAddress,
+						EndAt:            endAt,
+						CreatedAt:        createdAt,
+						ImageObjectKey:   "campaigns/rescue photo.png",
+						Country:          "Indonesia",
+						ZipCode:          "10110",
+						Status:           domain.CampaignStatusActive,
+					},
+					FundraiserName:          "Paw Rescue",
+					FundraiserWalletAddress: "0xFundraiser",
+				},
+				publicGetErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewCampaignHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/0xCaMpAiGn", nil)
+			routeContext := chi.NewRouteContext()
+			routeContext.URLParams.Add("address", test.address)
+			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+			response := httptest.NewRecorder()
+
+			handler.HandleGetPublicCampaignDetail(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if serviceStub.publicGetCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.publicGetCalls, test.wantCalls)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+			if serviceStub.publicAddress != "0xCaMpAiGn" {
+				t.Errorf("service address = %q, want trimmed address", serviceStub.publicAddress)
+			}
+
+			var data publicCampaignDetailResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode success data: %v", err)
+			}
+			if data.ID != campaignID || data.Fundraiser.ID != fundraiserID || data.Fundraiser.Name != "Paw Rescue" || data.Fundraiser.Address != "0xFundraiser" || data.ContractAddress != contractAddress || data.Status != domain.CampaignStatusActive {
+				t.Errorf("response data = %#v", data)
+			}
+			if data.ImageURL != "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png" || data.Fundraiser.ImageURL != nil {
+				t.Errorf("response image URLs = %#v", data)
 			}
 		})
 	}

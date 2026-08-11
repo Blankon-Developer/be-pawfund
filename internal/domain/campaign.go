@@ -68,3 +68,12 @@ type PublicCampaignListItem struct {
 	Campaign
 	FundraiserImageObjectKey *string
 }
+
+// PublicCampaignDetail contains the campaign fields that are safe to expose
+// publicly, together with the fundraiser identity shown on the campaign page.
+type PublicCampaignDetail struct {
+	Campaign
+	FundraiserName           string
+	FundraiserWalletAddress  string
+	FundraiserImageObjectKey *string
+}

@@ -32,6 +32,7 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 		r.Post("/auth/message", application.AuthHandler.HandleCreateMessage)
 		r.Post("/auth/verify", application.AuthHandler.HandleVerify)
 		r.Get("/campaigns", application.CampaignHandler.HandleGetPublicCampaignList)
+		r.Get("/campaigns/{address}", application.CampaignHandler.HandleGetPublicCampaignDetail)
 		r.Get("/fundraiser/{address}", application.FundraiserHandler.HandleGetPublicProfile)
 
 		r.Group(func(r chi.Router) {

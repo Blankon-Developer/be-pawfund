@@ -480,6 +480,100 @@ func TestGetPublicCampaignListEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetPublicCampaignDetailEndpoint(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	fundraiserImageObjectKey := "profiles/public-fundraiser.png"
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiser := newFundraiser("public@example.com", "0xPublicFundraiser", &fundraiserImageObjectKey)
+	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+
+	visibleCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Emergency Rescue",
+		"Help animals urgently",
+		domain.CampaignStatusCompleted,
+		domain.CampaignDeploymentStatusDeployed,
+		100,
+		90,
+		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
+	)
+	var visibleAddress string
+	if err := testDatabase.QueryRowContext(
+		t.Context(),
+		`SELECT contract_address FROM campaigns WHERE id = $1`,
+		visibleCampaignID,
+	).Scan(&visibleAddress); err != nil {
+		t.Fatalf("get public campaign address: %v", err)
+	}
+
+	router, _ := newCampaignIntegrationRouter(t)
+	response := requestPublicCampaignDetail(t, router, strings.ToLower(visibleAddress))
+	if response.Code != http.StatusOK {
+		t.Fatalf("detail status = %d; body: %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+	}
+	var envelope struct {
+		Code string `json:"code"`
+		Data struct {
+			ID              uuid.UUID             `json:"id"`
+			Title           string                `json:"title"`
+			Status          domain.CampaignStatus `json:"status"`
+			ContractAddress string                `json:"contractAddress"`
+			ImageURL        string                `json:"imageUrl"`
+			Fundraiser      struct {
+				ID       uuid.UUID `json:"id"`
+				Name     string    `json:"name"`
+				Address  string    `json:"address"`
+				ImageURL *string   `json:"imageUrl"`
+			} `json:"fundraiser"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode campaign detail response: %v", err)
+	}
+	if envelope.Code != "CAMPAIGN_RETRIEVED" || envelope.Data.ID != visibleCampaignID || envelope.Data.Title != "Emergency Rescue" || envelope.Data.Status != domain.CampaignStatusCompleted || envelope.Data.ContractAddress != visibleAddress {
+		t.Errorf("campaign detail = %#v", envelope)
+	}
+	if envelope.Data.ImageURL != "https://cdn.example.com/pawfund/campaigns/public-listed-campaign.png" || envelope.Data.Fundraiser.ID != fundraiser.ID || envelope.Data.Fundraiser.Name != fundraiser.Name || envelope.Data.Fundraiser.Address != fundraiser.WalletAddress || envelope.Data.Fundraiser.ImageURL == nil || *envelope.Data.Fundraiser.ImageURL != "https://cdn.example.com/pawfund/profiles/public-fundraiser.png" {
+		t.Errorf("campaign detail public fields = %#v", envelope.Data)
+	}
+
+	hiddenCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Pending Deployment",
+		"This campaign must not be visible",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusPending,
+		100,
+		0,
+		time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC),
+	)
+	const hiddenAddress = "0xPendingCampaign"
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`UPDATE campaigns SET contract_address = $1 WHERE id = $2`,
+		hiddenAddress,
+		hiddenCampaignID,
+	); err != nil {
+		t.Fatalf("add hidden campaign address: %v", err)
+	}
+	result := decodeAuthEndpointResult(t, requestPublicCampaignDetail(t, router, hiddenAddress))
+	if result.HTTPStatus != http.StatusNotFound || result.Code != "CAMPAIGN_NOT_FOUND" {
+		t.Errorf("pending public detail = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+
+	result = decodeAuthEndpointResult(t, requestPublicCampaignDetail(t, router, "0xUnknownCampaign"))
+	if result.HTTPStatus != http.StatusNotFound || result.Code != "CAMPAIGN_NOT_FOUND" {
+		t.Errorf("unknown public detail = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+}
+
 func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -552,6 +646,18 @@ func requestPublicCampaignList(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns"+query, nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func requestPublicCampaignDetail(
+	t *testing.T,
+	router http.Handler,
+	contractAddress string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+contractAddress, nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response

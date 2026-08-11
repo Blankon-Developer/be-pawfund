@@ -888,46 +888,48 @@
       "get": {
         "tags": ["Public Campaigns"],
         "summary": "Get Campaign Detail",
+		"description": "Get a deployed public campaign by its contract address. Contract address matching is case-insensitive.",
         "responses": {
           "200": {
-            "description": "",
+			"description": "Campaign retrieved successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+					"status": { "type": "string", "enum": ["success"] },
+					"code": { "type": "string", "enum": ["CAMPAIGN_RETRIEVED"] },
+					"message": { "type": "string", "default": "Campaign retrieved successfully." },
                     "data": {
                       "type": "object",
                       "properties": {
+						"id": { "type": "string", "format": "uuid" },
                         "title": { "type": "string" },
                         "shortDescription": { "type": "string" },
                         "story": { "type": "string" },
                         "fundraiser": {
                           "type": "object",
                           "properties": {
-                            "name": { "type": "string" },
-                            "imageUrl": { "type": "string" },
-                            "address": { "type": "string" },
-                            "id": { "type": "string" }
+							"id": { "type": "string", "format": "uuid" },
+							"name": { "type": "string" },
+							"imageUrl": { "type": "string", "format": "uri", "nullable": true },
+                            "address": { "type": "string" }
                           },
                           "required": ["name", "imageUrl", "address", "id"]
                         },
-                        "goalAmount": { "type": "number" },
-                        "raisedAmount": { "type": "number" },
-                        "donorCount": { "type": "number" },
+						"goalAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+						"raisedAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+						"donorCount": { "type": "integer", "format": "int64" },
                         "contractAddress": { "type": "string" },
-                        "endAt": { "type": "string" },
-                        "createdAt": { "type": "string" },
-                        "imageUrl": { "type": "string" },
+						"endAt": { "type": "string", "format": "date-time" },
+						"createdAt": { "type": "string", "format": "date-time" },
+						"imageUrl": { "type": "string", "format": "uri" },
                         "country": { "type": "string" },
                         "zipCode": { "type": "string" },
                         "status": {
                           "type": "string",
-                          "enum": ["ACTIVE", "COMPLETED"]
-                        },
-                        "id": { "type": "string", "description": "uuid" }
+							"enum": ["active", "completed", "cancelled"]
+						}
                       },
                       "required": [
                         "title",
@@ -946,18 +948,22 @@
                         "status",
                         "id"
                       ]
-                    }
-                  },
-                  "required": ["code", "message", "data"]
+					},
+					"errors": { "type": "object", "nullable": true }
+				  },
+				  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
-          }
+		  },
+		  "404": { "description": "No deployed public campaign matches the supplied contract address." },
+		  "500": { "description": "An unexpected server error occurred while retrieving the campaign." }
         },
         "parameters": [
           {
             "in": "path",
             "name": "address",
+			"description": "Deployed campaign contract address. Matching is case-insensitive.",
             "schema": { "type": "string" },
             "required": true
           }

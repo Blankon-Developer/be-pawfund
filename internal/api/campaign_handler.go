@@ -25,6 +25,7 @@ const (
 type CampaignService interface {
 	Create(ctx context.Context, input service.CreateCampaignInput) (domain.Campaign, error)
 	ListPublicCampaigns(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, error)
+	GetPublicCampaignDetail(ctx context.Context, contractAddress string) (domain.PublicCampaignDetail, error)
 	ListMyCampaigns(ctx context.Context, walletAddress string, options domain.CampaignListOptions) ([]domain.Campaign, error)
 	GetMyCampaignDetail(ctx context.Context, walletAddress string, campaignID uuid.UUID) (domain.Campaign, error)
 }
@@ -86,6 +87,53 @@ func (h *CampaignHandler) HandleGetPublicCampaignList(w http.ResponseWriter, r *
 		})
 	}
 	h.Success(w, http.StatusOK, "CAMPAIGNS_RETRIEVED", "Campaigns retrieved successfully.", response)
+}
+
+func (h *CampaignHandler) HandleGetPublicCampaignDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	campaign, err := h.service.GetPublicCampaignDetail(r.Context(), strings.TrimSpace(chi.URLParam(r, "address")))
+	if err != nil {
+		if errors.Is(err, service.ErrCampaignNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"CAMPAIGN_NOT_FOUND",
+				"No public campaign was found for the requested contract address.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get public campaign detail", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	campaignImageObjectKey := campaign.ImageObjectKey
+	response := publicCampaignDetailResponse{
+		ID:               campaign.ID,
+		Title:            campaign.Title,
+		ShortDescription: campaign.ShortDescription,
+		Story:            campaign.Story,
+		Fundraiser: campaignFundraiser{
+			ID:       campaign.FundraiserID,
+			Name:     campaign.FundraiserName,
+			ImageURL: h.urlBuilder.Build(campaign.FundraiserImageObjectKey),
+			Address:  campaign.FundraiserWalletAddress,
+		},
+		GoalAmount:      campaign.GoalAmount,
+		RaisedAmount:    campaign.RaisedAmount,
+		DonorCount:      campaign.DonorCount,
+		ContractAddress: valueOrEmpty(campaign.ContractAddress),
+		EndAt:           campaign.EndAt.UTC().Format(time.RFC3339),
+		CreatedAt:       campaign.CreatedAt.UTC().Format(time.RFC3339),
+		ImageURL:        valueOrEmpty(h.urlBuilder.Build(&campaignImageObjectKey)),
+		Country:         campaign.Country,
+		ZipCode:         campaign.ZipCode,
+		Status:          campaign.Status,
+	}
+	h.Success(w, http.StatusOK, "CAMPAIGN_RETRIEVED", "Campaign retrieved successfully.", response)
 }
 
 func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Request) {

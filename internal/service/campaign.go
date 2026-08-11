@@ -58,6 +58,20 @@ func (s *CampaignService) ListPublicCampaigns(
 	return campaigns, nil
 }
 
+func (s *CampaignService) GetPublicCampaignDetail(
+	ctx context.Context,
+	contractAddress string,
+) (domain.PublicCampaignDetail, error) {
+	campaign, err := s.repository.FindPublicByContractAddress(ctx, strings.TrimSpace(contractAddress))
+	if err != nil {
+		if errors.Is(err, repository.ErrCampaignNotFound) {
+			return domain.PublicCampaignDetail{}, ErrCampaignNotFound
+		}
+		return domain.PublicCampaignDetail{}, fmt.Errorf("service: get public campaign detail: %w", err)
+	}
+	return campaign, nil
+}
+
 func (s *CampaignService) ListMyCampaigns(
 	ctx context.Context,
 	walletAddress string,

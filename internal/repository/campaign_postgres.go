@@ -88,6 +88,53 @@ func (r *PostgresCampaignRepository) ListPublic(
 	return campaigns, nil
 }
 
+func (r *PostgresCampaignRepository) FindPublicByContractAddress(
+	ctx context.Context,
+	contractAddress string,
+) (domain.PublicCampaignDetail, error) {
+	const query = `
+		SELECT
+			c.id,
+			c.fundraiser_id,
+			c.event_id,
+			c.title,
+			c.short_description,
+			c.story,
+			c.goal_amount,
+			c.raised_amount,
+			c.donor_count,
+			c.contract_address,
+			c.created_at,
+			c.end_at,
+			c.image_object_key,
+			c.country,
+			c.zip_code,
+			c.status,
+			c.deployment_status,
+			c.idempotency_key,
+			f.name,
+			u.wallet_address,
+			f.image_object_key
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE LOWER(c.contract_address) = LOWER($1)
+			AND u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND c.deployment_status = 'deployed'
+			AND c.contract_address IS NOT NULL
+	`
+
+	campaign, err := scanPublicCampaignDetail(r.db.QueryRowContext(ctx, query, strings.TrimSpace(contractAddress)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PublicCampaignDetail{}, ErrCampaignNotFound
+	}
+	if err != nil {
+		return domain.PublicCampaignDetail{}, fmt.Errorf("repository: find public campaign by contract address: %w", err)
+	}
+	return campaign, nil
+}
+
 func (r *PostgresCampaignRepository) ListForFundraiser(
 	ctx context.Context,
 	walletAddress string,
@@ -372,6 +419,51 @@ func scanPublicCampaignListItem(scanner campaignScanner) (domain.PublicCampaignL
 		item.FundraiserImageObjectKey = &fundraiserImageKey.String
 	}
 	return item, nil
+}
+
+func scanPublicCampaignDetail(scanner campaignScanner) (domain.PublicCampaignDetail, error) {
+	var (
+		detail             domain.PublicCampaignDetail
+		eventID            uuid.NullUUID
+		contractAddress    sql.NullString
+		fundraiserImageKey sql.NullString
+	)
+	err := scanner.Scan(
+		&detail.ID,
+		&detail.FundraiserID,
+		&eventID,
+		&detail.Title,
+		&detail.ShortDescription,
+		&detail.Story,
+		&detail.GoalAmount,
+		&detail.RaisedAmount,
+		&detail.DonorCount,
+		&contractAddress,
+		&detail.CreatedAt,
+		&detail.EndAt,
+		&detail.ImageObjectKey,
+		&detail.Country,
+		&detail.ZipCode,
+		&detail.Status,
+		&detail.DeploymentStatus,
+		&detail.IdempotencyKey,
+		&detail.FundraiserName,
+		&detail.FundraiserWalletAddress,
+		&fundraiserImageKey,
+	)
+	if err != nil {
+		return domain.PublicCampaignDetail{}, err
+	}
+	if eventID.Valid {
+		detail.EventID = &eventID.UUID
+	}
+	if contractAddress.Valid {
+		detail.ContractAddress = &contractAddress.String
+	}
+	if fundraiserImageKey.Valid {
+		detail.FundraiserImageObjectKey = &fundraiserImageKey.String
+	}
+	return detail, nil
 }
 
 func findCampaignByIdempotencyKey(

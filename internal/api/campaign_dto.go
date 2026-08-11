@@ -221,3 +221,28 @@ type publicCampaignListItemResponse struct {
 	ContractAddress    *string               `json:"contractAddress"`
 	Status             domain.CampaignStatus `json:"status"`
 }
+
+type campaignFundraiser struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	ImageURL *string   `json:"imageUrl"`
+	Address  string    `json:"address"`
+}
+
+type publicCampaignDetailResponse struct {
+	ID               uuid.UUID             `json:"id"`
+	Title            string                `json:"title"`
+	ShortDescription string                `json:"shortDescription"`
+	Story            string                `json:"story"`
+	Fundraiser       campaignFundraiser    `json:"fundraiser"`
+	GoalAmount       int64                 `json:"goalAmount"`
+	RaisedAmount     int64                 `json:"raisedAmount"`
+	DonorCount       int64                 `json:"donorCount"`
+	ContractAddress  string                `json:"contractAddress"`
+	EndAt            string                `json:"endAt"`
+	CreatedAt        string                `json:"createdAt"`
+	ImageURL         string                `json:"imageUrl"`
+	Country          string                `json:"country"`
+	ZipCode          string                `json:"zipCode"`
+	Status           domain.CampaignStatus `json:"status"`
+}
