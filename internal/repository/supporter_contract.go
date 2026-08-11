@@ -15,6 +15,11 @@ var (
 type SupporterRepository interface {
 	Create(ctx context.Context, supporter domain.Supporter) (domain.Supporter, error)
 	FindByWalletAddress(ctx context.Context, walletAddress string) (domain.Supporter, bool, error)
+	ListDonationsByWalletAddress(
+		ctx context.Context,
+		walletAddress string,
+		options domain.DonationListOptions,
+	) ([]domain.Donation, bool, error)
 	ReplaceProfile(
 		ctx context.Context,
 		walletAddress string,

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
@@ -418,6 +419,168 @@ func TestPostgresSupporterRepositoryDeleteProfile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPostgresSupporterRepositoryListDonationsByWalletAddress(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	repo := repository.NewPostgresSupporterRepository(testDatabase)
+	owner := newSupporter("owner@example.com", "0xSupporterChecksum", nil)
+	other := newSupporter("other@example.com", "0xOtherSupporter", nil)
+	empty := newSupporter("empty@example.com", "0xEmptySupporter", nil)
+	mustCreateSupporter(t, repo, owner)
+	mustCreateSupporter(t, repo, other)
+	mustCreateSupporter(t, repo, empty)
+
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiser := newFundraiser("fundraiser@example.com", "0xFundraiser", nil)
+	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+	campaignID, contractAddress := mustCreateDonationCampaign(t, fundraiser.ID, "Emergency Rescue")
+
+	oldest := time.Date(2026, time.August, 9, 8, 0, 0, 0, time.UTC)
+	middle := oldest.Add(time.Hour)
+	newest := middle.Add(time.Hour)
+	mustCreateDonation(t, campaignID, owner.ID, 1_000_000, "0xOldest", oldest, 10, 0)
+	mustCreateDonation(t, campaignID, owner.ID, 2_000_000, "0xMiddle", middle, 11, 0)
+	mustCreateDonation(t, campaignID, owner.ID, 3_000_000, "0xNewest", newest, 12, 0)
+	mustCreateDonation(t, campaignID, other.ID, 9_000_000, "0xOther", newest.Add(time.Hour), 13, 0)
+
+	firstPage, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		strings.ToLower(owner.WalletAddress),
+		domain.DonationListOptions{Page: 1, PageSize: 2},
+	)
+	if err != nil {
+		t.Fatalf("ListDonationsByWalletAddress() unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("active supporter was not found")
+	}
+	if len(firstPage) != 2 || firstPage[0].TxHash != "0xNewest" || firstPage[1].TxHash != "0xMiddle" {
+		t.Fatalf("first page = %#v", firstPage)
+	}
+	if firstPage[0].Amount != 3_000_000 || firstPage[0].Campaign.Title != "Emergency Rescue" || firstPage[0].Campaign.ContractAddress != contractAddress || !firstPage[0].DonatedAt.Equal(newest) {
+		t.Errorf("first donation = %#v", firstPage[0])
+	}
+
+	secondPage, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		owner.WalletAddress,
+		domain.DonationListOptions{Page: 2, PageSize: 2},
+	)
+	if err != nil || !found {
+		t.Fatalf("second page found/error = %v/%v", found, err)
+	}
+	if len(secondPage) != 1 || secondPage[0].TxHash != "0xOldest" {
+		t.Errorf("second page = %#v", secondPage)
+	}
+
+	emptyPage, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		empty.WalletAddress,
+		domain.DonationListOptions{Page: 1, PageSize: 10},
+	)
+	if err != nil || !found || len(emptyPage) != 0 || emptyPage == nil {
+		t.Errorf("empty supporter result = %#v, found=%v, err=%v", emptyPage, found, err)
+	}
+
+	unknownPage, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		"0xUnknown",
+		domain.DonationListOptions{Page: 1, PageSize: 10},
+	)
+	if err != nil || found || unknownPage != nil {
+		t.Errorf("unknown supporter result = %#v, found=%v, err=%v", unknownPage, found, err)
+	}
+
+	if _, _, err := repo.DeleteProfile(t.Context(), owner.WalletAddress); err != nil {
+		t.Fatalf("delete supporter profile: %v", err)
+	}
+	deletedPage, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		owner.WalletAddress,
+		domain.DonationListOptions{Page: 1, PageSize: 10},
+	)
+	if err != nil || found || deletedPage != nil {
+		t.Errorf("deleted supporter result = %#v, found=%v, err=%v", deletedPage, found, err)
+	}
+}
+
+func mustCreateDonationCampaign(t *testing.T, fundraiserID uuid.UUID, title string) (uuid.UUID, string) {
+	t.Helper()
+	eventID := uuid.New()
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+		 VALUES ($1, $2, 0, 'campaign_created', 1, CURRENT_TIMESTAMP)`,
+		eventID,
+		"0xCampaignCreated"+eventID.String(),
+	); err != nil {
+		t.Fatalf("prepare campaign blockchain event: %v", err)
+	}
+
+	campaignID := uuid.New()
+	contractAddress := "0xCampaign" + campaignID.String()
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO campaigns (
+			id, fundraiser_id, event_id, title, short_description, story,
+			goal_amount, contract_address, end_at, image_object_key, country,
+			zip_code, deployment_status, idempotency_key
+		) VALUES (
+			$1, $2, $3, $4, 'Help animals urgently', 'Campaign story.',
+			100000000, $5, CURRENT_TIMESTAMP + INTERVAL '30 days',
+			'campaigns/donation-campaign.png', 'Indonesia', '10110', 'deployed', $6
+		)`,
+		campaignID,
+		fundraiserID,
+		eventID,
+		title,
+		contractAddress,
+		"donation-campaign-"+campaignID.String(),
+	); err != nil {
+		t.Fatalf("prepare donation campaign: %v", err)
+	}
+	return campaignID, contractAddress
+}
+
+func mustCreateDonation(
+	t *testing.T,
+	campaignID uuid.UUID,
+	supporterID uuid.UUID,
+	amount int64,
+	txHash string,
+	createdAt time.Time,
+	blockNumber int,
+	logIndex int,
+) {
+	t.Helper()
+	eventID := uuid.New()
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+		 VALUES ($1, $2, $3, 'donation_created', $4, $5)`,
+		eventID,
+		txHash,
+		logIndex,
+		blockNumber,
+		createdAt,
+	); err != nil {
+		t.Fatalf("prepare donation blockchain event: %v", err)
+	}
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`INSERT INTO donations (id, campaign_id, supporter_id, event_id, amount)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		uuid.New(),
+		campaignID,
+		supporterID,
+		eventID,
+		amount,
+	); err != nil {
+		t.Fatalf("prepare donation: %v", err)
 	}
 }
 

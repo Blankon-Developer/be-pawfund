@@ -1234,44 +1234,109 @@
       "get": {
         "tags": ["Supporter Profile"],
         "summary": "List My Donations",
+        "description": "List indexed on-chain donations made by the authenticated active supporter. Results are ordered by blockchain event time from newest to oldest.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "Donations retrieved successfully.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "properties": {
-                          "amount": { "type": "number" },
-                          "campaign": {
-                            "type": "object",
-                            "properties": {
-                              "title": { "type": "string" },
-                              "contractAddress": { "type": "string" }
-                            },
-                            "required": ["title", "contractAddress"]
-                          },
-                          "donatedOn": { "type": "string" },
-                          "txHash": { "type": "string" }
-                        },
-                        "type": "object",
-                        "required": [
-                          "amount",
-                          "campaign",
-                          "donatedOn",
-                          "txHash"
-                        ]
-                      }
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/MyDonationsSuccessResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "A Bearer access token is missing, malformed, invalid, or expired.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              },
+              "WWW-Authenticate": {
+                "$ref": "#/components/headers/BearerAuthentication"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthAccessTokenError" }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated wallet is not a supporter.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SupporterAccessRequiredError" }
+              }
+            }
+          },
+          "404": {
+            "description": "No active supporter profile is registered for the authenticated wallet.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SupporterProfileNotFoundError" }
+              }
+            }
+          },
+          "422": {
+            "description": "One or more pagination parameters are invalid.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DonationListValidationError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while listing donations.",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStoreCacheControl"
+              },
+              "Vary": {
+                "$ref": "#/components/headers/AuthorizationVary"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
@@ -1282,6 +1347,27 @@
             "name": "Authorization",
             "schema": { "type": "string", "default": "Bearer {token}" },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
           }
         ],
         "operationId": "get_supporter-donations"
@@ -2121,6 +2207,79 @@
           "errors": { "type": "object", "nullable": true }
         },
         "required": ["status", "code", "message", "data", "errors"]
+      },
+      "MyDonationsSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["DONATIONS_RETRIEVED"] },
+          "message": { "type": "string", "default": "Donations retrieved successfully." },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "amount": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Donation amount in atomic USDC units."
+                },
+                "campaign": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "title": { "type": "string" },
+                    "contractAddress": { "type": "string" }
+                  },
+                  "required": ["title", "contractAddress"]
+                },
+                "donatedOn": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "UTC timestamp recorded for the indexed blockchain donation event."
+                },
+                "txHash": { "type": "string" }
+              },
+              "required": ["amount", "campaign", "donatedOn", "txHash"]
+            }
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "SupporterAccessRequiredError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["SUPPORTER_ACCESS_REQUIRED"] },
+              "message": { "type": "string", "default": "A registered supporter account is required." }
+            }
+          }
+        ]
+      },
+      "DonationListValidationError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+              "message": { "type": "string", "default": "One or more fields are invalid." },
+              "errors": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "page": { "type": "array", "items": { "type": "string" } },
+                  "pageSize": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        ]
       },
       "SupporterProfileNotFoundError": {
         "allOf": [

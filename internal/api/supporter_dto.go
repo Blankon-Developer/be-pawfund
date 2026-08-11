@@ -1,6 +1,8 @@
 package api
 
 import (
+	"math"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -10,9 +12,12 @@ import (
 )
 
 const (
-	maxNameCharacters      = 255
-	maxEmailCharacters     = 255
-	maxImageObjectKeyBytes = 1024
+	maxNameCharacters           = 255
+	maxEmailCharacters          = 255
+	maxImageObjectKeyBytes      = 1024
+	defaultDonationListPage     = 1
+	defaultDonationListPageSize = 10
+	maxDonationListPageSize     = 100
 )
 
 var emailPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
@@ -134,4 +139,51 @@ func (r replaceSupporterProfileRequest) toProfileReplacement() domain.SupporterP
 			Value: r.ImageObjectKey.value,
 		},
 	}
+}
+
+type myDonationCampaignItem struct {
+	Title           string `json:"title"`
+	ContractAddress string `json:"contractAddress"`
+}
+
+type myDonationItemListResponse struct {
+	Amount    int64                  `json:"amount"`
+	Campaign  myDonationCampaignItem `json:"campaign"`
+	DonatedOn string                 `json:"donatedOn"`
+	TxHash    string                 `json:"txHash"`
+}
+
+func donationListOptionsFromQuery(query url.Values) (domain.DonationListOptions, httpx.FieldErrors) {
+	options := domain.DonationListOptions{
+		Page:     defaultDonationListPage,
+		PageSize: defaultDonationListPageSize,
+	}
+	fieldErrors := make(httpx.FieldErrors)
+
+	if rawPage, ok := query["page"]; ok {
+		page, valid := parsePositiveInt64(firstQueryValue(rawPage))
+		if !valid {
+			fieldErrors.Add("page", "page must be a positive integer!")
+		} else {
+			options.Page = page
+		}
+	}
+
+	if rawPageSize, ok := query["pageSize"]; ok {
+		pageSize, valid := parsePositiveInt64(firstQueryValue(rawPageSize))
+		if !valid || pageSize > maxDonationListPageSize {
+			fieldErrors.Add("pageSize", "pageSize must be an integer between 1 and 100!")
+		} else {
+			options.PageSize = pageSize
+		}
+	}
+
+	if _, pageInvalid := fieldErrors["page"]; !pageInvalid && options.Page-1 > math.MaxInt64/options.PageSize {
+		fieldErrors.Add("page", "page is too large!")
+	}
+
+	if len(fieldErrors) == 0 {
+		return options, nil
+	}
+	return domain.DonationListOptions{}, fieldErrors
 }

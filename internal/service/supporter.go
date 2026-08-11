@@ -95,6 +95,26 @@ func (s *SupporterService) GetProfile(ctx context.Context, walletAddress string)
 	return supporter, nil
 }
 
+func (s *SupporterService) ListMyDonations(
+	ctx context.Context,
+	walletAddress string,
+	options domain.DonationListOptions,
+) ([]domain.Donation, error) {
+	donations, found, err := s.repository.ListDonationsByWalletAddress(
+		ctx,
+		strings.TrimSpace(walletAddress),
+		options,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("service: list supporter donations: %w", err)
+	}
+	if !found {
+		return nil, ErrProfileNotFound
+	}
+
+	return donations, nil
+}
+
 func (s *SupporterService) ReplaceProfile(ctx context.Context, input ReplaceSupporterProfileInput) error {
 	result, found, err := s.repository.ReplaceProfile(
 		ctx,

@@ -15,10 +15,12 @@ import (
 type stubSupporterRepository struct {
 	create        func(context.Context, domain.Supporter) (domain.Supporter, error)
 	find          func(context.Context, string) (domain.Supporter, bool, error)
+	listDonations func(context.Context, string, domain.DonationListOptions) ([]domain.Donation, bool, error)
 	replace       func(context.Context, string, domain.SupporterProfileReplacement) (repository.ReplaceSupporterProfileResult, bool, error)
 	delete        func(context.Context, string) (repository.DeleteSupporterProfileResult, bool, error)
 	called        int
 	findCalled    int
+	listCalled    int
 	replaceCalled int
 	deleteCalled  int
 }
@@ -46,6 +48,18 @@ func (s *stubSupporterRepository) FindByWalletAddress(
 ) (domain.Supporter, bool, error) {
 	s.findCalled++
 	return s.find(ctx, walletAddress)
+}
+
+func (s *stubSupporterRepository) ListDonationsByWalletAddress(
+	ctx context.Context,
+	walletAddress string,
+	options domain.DonationListOptions,
+) ([]domain.Donation, bool, error) {
+	s.listCalled++
+	if s.listDonations == nil {
+		return nil, false, nil
+	}
+	return s.listDonations(ctx, walletAddress, options)
 }
 
 func (s *stubSupporterRepository) ReplaceProfile(
@@ -250,6 +264,62 @@ func TestSupporterServiceGetProfile(t *testing.T) {
 			}
 			if repo.findCalled != 1 {
 				t.Errorf("repository calls = %d, want 1", repo.findCalled)
+			}
+		})
+	}
+}
+
+func TestSupporterServiceListMyDonations(t *testing.T) {
+	repositoryFailure := errors.New("database unavailable")
+	donations := []domain.Donation{{Amount: 2_500_000, TxHash: "0xTransaction"}}
+	options := domain.DonationListOptions{Page: 2, PageSize: 25}
+
+	tests := []struct {
+		name            string
+		found           bool
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns supporter donations", found: true},
+		{name: "returns profile not found", wantError: ErrProfileNotFound},
+		{name: "wraps repository failure", found: true, repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			type contextKey struct{}
+			ctx := context.WithValue(context.Background(), contextKey{}, "request-context")
+			repo := &stubSupporterRepository{
+				listDonations: func(gotCtx context.Context, walletAddress string, gotOptions domain.DonationListOptions) ([]domain.Donation, bool, error) {
+					if gotCtx.Value(contextKey{}) != "request-context" {
+						t.Error("request context was not propagated")
+					}
+					if walletAddress != "0xSupporter" || gotOptions != options {
+						t.Errorf("repository input = %q/%#v", walletAddress, gotOptions)
+					}
+					return donations, test.found, test.repositoryError
+				},
+			}
+			supporterService := NewSupporterService(repo, nil)
+
+			got, err := supporterService.ListMyDonations(ctx, " 0xSupporter ", options)
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ListMyDonations() error = %v, want %v", err, test.wantError)
+				}
+				if test.repositoryError != nil && !strings.Contains(err.Error(), "list supporter donations") {
+					t.Errorf("ListMyDonations() error lacks operation context: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("ListMyDonations() unexpected error: %v", err)
+				}
+				if len(got) != 1 || got[0].TxHash != "0xTransaction" {
+					t.Errorf("donations = %#v", got)
+				}
+			}
+			if repo.listCalled != 1 {
+				t.Errorf("repository calls = %d, want 1", repo.listCalled)
 			}
 		})
 	}

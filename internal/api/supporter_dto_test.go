@@ -2,10 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"math"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 )
 
@@ -182,6 +186,59 @@ func TestReplaceSupporterProfileRequestImageModesAndValidation(t *testing.T) {
 			}
 			if got := request.validate(); !reflect.DeepEqual(got, test.wantFieldError) {
 				t.Errorf("validate() = %#v, want %#v", got, test.wantFieldError)
+			}
+		})
+	}
+}
+
+func TestDonationListOptionsFromQuery(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       url.Values
+		wantOptions domain.DonationListOptions
+		wantErrors  httpx.FieldErrors
+	}{
+		{
+			name:        "uses defaults when pagination is omitted",
+			query:       url.Values{},
+			wantOptions: domain.DonationListOptions{Page: 1, PageSize: 10},
+		},
+		{
+			name: "accepts valid pagination",
+			query: url.Values{
+				"page":     {" 2 "},
+				"pageSize": {"100"},
+			},
+			wantOptions: domain.DonationListOptions{Page: 2, PageSize: 100},
+		},
+		{
+			name: "rejects invalid pagination",
+			query: url.Values{
+				"page":     {"0"},
+				"pageSize": {"101"},
+			},
+			wantErrors: httpx.FieldErrors{
+				"page":     {"page must be a positive integer!"},
+				"pageSize": {"pageSize must be an integer between 1 and 100!"},
+			},
+		},
+		{
+			name: "rejects an overflowing offset",
+			query: url.Values{
+				"page": {strconv.FormatInt(math.MaxInt64, 10)},
+			},
+			wantErrors: httpx.FieldErrors{"page": {"page is too large!"}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotOptions, gotErrors := donationListOptionsFromQuery(test.query)
+			if !reflect.DeepEqual(gotErrors, test.wantErrors) {
+				t.Errorf("errors = %#v, want %#v", gotErrors, test.wantErrors)
+			}
+			if test.wantErrors == nil && !reflect.DeepEqual(gotOptions, test.wantOptions) {
+				t.Errorf("options = %#v, want %#v", gotOptions, test.wantOptions)
 			}
 		})
 	}

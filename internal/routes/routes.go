@@ -44,6 +44,7 @@ func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 			r.Get("/supporter/profile", application.SupporterHandler.HandleGetProfile)
 			r.Put("/supporter/profile", application.SupporterHandler.HandleReplaceProfile)
 			r.Delete("/supporter/profile", application.SupporterHandler.HandleDeleteProfile)
+			r.Get("/supporter/donations", application.SupporterHandler.HandleGetMyDonations)
 			r.Get("/fundraiser/profile", application.FundraiserHandler.HandleGetProfile)
 			r.Put("/fundraiser/profile", application.FundraiserHandler.HandleReplaceProfile)
 			r.Delete("/fundraiser/profile", application.FundraiserHandler.HandleDeleteProfile)

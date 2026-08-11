@@ -113,6 +113,78 @@ func (r *PostgresSupporterRepository) FindByWalletAddress(
 	return supporter, true, nil
 }
 
+func (r *PostgresSupporterRepository) ListDonationsByWalletAddress(
+	ctx context.Context,
+	walletAddress string,
+	options domain.DonationListOptions,
+) ([]domain.Donation, bool, error) {
+	const findSupporter = `
+		SELECT u.id
+		FROM users u
+		JOIN supporters s ON s.id = u.id
+		WHERE u.role = 'supporter'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
+	`
+
+	var supporterID string
+	if err := r.db.QueryRowContext(ctx, findSupporter, strings.TrimSpace(walletAddress)).Scan(&supporterID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("repository: find supporter for donation list: %w", err)
+	}
+
+	const query = `
+		SELECT
+			d.amount,
+			c.title,
+			c.contract_address,
+			be.created_at,
+			be.tx_hash
+		FROM donations d
+		JOIN campaigns c ON c.id = d.campaign_id
+		JOIN blockchain_events be ON be.id = d.event_id
+		WHERE d.supporter_id = $1
+		ORDER BY be.created_at DESC, be.block_number DESC, be.log_index DESC, d.id DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	offset := (options.Page - 1) * options.PageSize
+	rows, err := r.db.QueryContext(ctx, query, supporterID, options.PageSize, offset)
+	if err != nil {
+		return nil, true, fmt.Errorf("repository: list supporter donations: %w", err)
+	}
+	defer rows.Close()
+
+	donations := make([]domain.Donation, 0)
+	for rows.Next() {
+		var (
+			donation        domain.Donation
+			contractAddress sql.NullString
+		)
+		if err := rows.Scan(
+			&donation.Amount,
+			&donation.Campaign.Title,
+			&contractAddress,
+			&donation.DonatedAt,
+			&donation.TxHash,
+		); err != nil {
+			return nil, true, fmt.Errorf("repository: scan supporter donation: %w", err)
+		}
+		if !contractAddress.Valid || strings.TrimSpace(contractAddress.String) == "" {
+			return nil, true, errors.New("repository: scan supporter donation: campaign contract address is missing")
+		}
+		donation.Campaign.ContractAddress = contractAddress.String
+		donations = append(donations, donation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, true, fmt.Errorf("repository: iterate supporter donations: %w", err)
+	}
+
+	return donations, true, nil
+}
+
 func (r *PostgresSupporterRepository) ReplaceProfile(
 	ctx context.Context,
 	walletAddress string,

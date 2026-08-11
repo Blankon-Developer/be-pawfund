@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
@@ -33,6 +34,11 @@ type stubSupporterRegistrar struct {
 	getProfileErr     error
 	getProfileCalls   int
 	getProfileAddress string
+	donations         []domain.Donation
+	listDonationsErr  error
+	listDonationCalls int
+	listWallet        string
+	listOptions       domain.DonationListOptions
 }
 
 func (s *stubSupporterRegistrar) ReplaceProfile(
@@ -80,6 +86,17 @@ func (s *stubSupporterRegistrar) GetProfile(
 		return domain.Supporter{}, s.getProfileErr
 	}
 	return s.profile, nil
+}
+
+func (s *stubSupporterRegistrar) ListMyDonations(
+	_ context.Context,
+	walletAddress string,
+	options domain.DonationListOptions,
+) ([]domain.Donation, error) {
+	s.listDonationCalls++
+	s.listWallet = walletAddress
+	s.listOptions = options
+	return s.donations, s.listDonationsErr
 }
 
 type decodedResponse struct {
@@ -564,6 +581,146 @@ func TestSupporterHandlerHandleDeleteProfile(t *testing.T) {
 			}
 			if decoded.Code != test.wantCode {
 				t.Errorf("response code = %q, want %q", decoded.Code, test.wantCode)
+			}
+		})
+	}
+}
+
+func TestSupporterHandlerHandleGetMyDonations(t *testing.T) {
+	donatedAt := time.Date(2026, time.August, 11, 8, 30, 45, 0, time.UTC)
+	donation := domain.Donation{
+		Amount: 2_500_000,
+		Campaign: domain.DonationCampaign{
+			Title:           "Emergency Rescue",
+			ContractAddress: "0xCampaign",
+		},
+		DonatedAt: donatedAt,
+		TxHash:    "0xTransaction",
+	}
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		query        string
+		principal    *auth.Principal
+		donations    []domain.Donation
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+		wantEmpty    bool
+	}{
+		{
+			name:      "returns paginated supporter donations",
+			query:     "?page=2&pageSize=25",
+			principal: &auth.Principal{WalletAddress: " 0xSupporter ", Role: domain.UserRoleSupporter},
+			donations: []domain.Donation{donation},
+			wantHTTP:  http.StatusOK,
+			wantCode:  "DONATIONS_RETRIEVED",
+			wantCalls: 1,
+		},
+		{
+			name:      "returns an empty JSON array",
+			principal: &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			wantHTTP:  http.StatusOK,
+			wantCode:  "DONATIONS_RETRIEVED",
+			wantCalls: 1,
+			wantEmpty: true,
+		},
+		{
+			name:     "requires authenticated principal",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:      "requires supporter role",
+			principal: &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			wantHTTP:  http.StatusForbidden,
+			wantCode:  "SUPPORTER_ACCESS_REQUIRED",
+		},
+		{
+			name:      "rejects invalid pagination",
+			query:     "?page=0&pageSize=101",
+			principal: &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			wantHTTP:  http.StatusUnprocessableEntity,
+			wantCode:  "VALIDATION_ERROR",
+		},
+		{
+			name:         "maps missing supporter profile",
+			principal:    &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			serviceError: service.ErrProfileNotFound,
+			wantHTTP:     http.StatusNotFound,
+			wantCode:     "PROFILE_NOT_FOUND",
+			wantCalls:    1,
+		},
+		{
+			name:         "hides unexpected service error",
+			principal:    &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			serviceStub := &stubSupporterRegistrar{
+				donations:        test.donations,
+				listDonationsErr: test.serviceError,
+			}
+			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/supporter/donations"+test.query, nil)
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetMyDonations(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if serviceStub.listDonationCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.listDonationCalls, test.wantCalls)
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+			if serviceStub.listWallet != "0xSupporter" {
+				t.Errorf("wallet = %q, want normalized supporter wallet", serviceStub.listWallet)
+			}
+			wantOptions := domain.DonationListOptions{Page: 1, PageSize: 10}
+			if test.query != "" {
+				wantOptions = domain.DonationListOptions{Page: 2, PageSize: 25}
+			}
+			if serviceStub.listOptions != wantOptions {
+				t.Errorf("options = %#v, want %#v", serviceStub.listOptions, wantOptions)
+			}
+			if test.wantEmpty {
+				if string(decoded.Data) != "[]" {
+					t.Errorf("empty data = %s, want []", decoded.Data)
+				}
+				return
+			}
+
+			var data []myDonationItemListResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode donation data: %v", err)
+			}
+			if len(data) != 1 || data[0].Amount != donation.Amount || data[0].Campaign.Title != donation.Campaign.Title || data[0].Campaign.ContractAddress != donation.Campaign.ContractAddress || data[0].DonatedOn != "2026-08-11T08:30:45Z" || data[0].TxHash != donation.TxHash {
+				t.Errorf("donation response = %#v", data)
 			}
 		})
 	}

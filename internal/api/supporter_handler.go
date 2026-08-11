@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
@@ -22,6 +23,7 @@ const (
 type SupporterService interface {
 	Register(ctx context.Context, input service.RegisterSupporterInput) (domain.Supporter, error)
 	GetProfile(ctx context.Context, walletAddress string) (domain.Supporter, error)
+	ListMyDonations(ctx context.Context, walletAddress string, options domain.DonationListOptions) ([]domain.Donation, error)
 	ReplaceProfile(ctx context.Context, input service.ReplaceSupporterProfileInput) error
 	DeleteProfile(ctx context.Context, walletAddress string) error
 }
@@ -132,6 +134,72 @@ func (h *SupporterHandler) HandleGetProfile(w http.ResponseWriter, r *http.Reque
 		ImageURL:      h.urlBuilder.Build(supporter.ImageObjectKey),
 	}
 	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
+}
+
+func (h *SupporterHandler) HandleGetMyDonations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+	if principal.Role != domain.UserRoleSupporter {
+		h.Error(
+			w,
+			http.StatusForbidden,
+			"SUPPORTER_ACCESS_REQUIRED",
+			"A registered supporter account is required.",
+			nil,
+		)
+		return
+	}
+
+	options, fieldErrors := donationListOptionsFromQuery(r.URL.Query())
+	if fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
+		return
+	}
+
+	donations, err := h.service.ListMyDonations(r.Context(), walletAddress, options)
+	if err != nil {
+		if errors.Is(err, service.ErrProfileNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"PROFILE_NOT_FOUND",
+				"No supporter profile is registered for the authenticated wallet.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("list supporter donations", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := make([]myDonationItemListResponse, 0, len(donations))
+	for _, donation := range donations {
+		response = append(response, myDonationItemListResponse{
+			Amount: donation.Amount,
+			Campaign: myDonationCampaignItem{
+				Title:           donation.Campaign.Title,
+				ContractAddress: donation.Campaign.ContractAddress,
+			},
+			DonatedOn: donation.DonatedAt.UTC().Format(time.RFC3339),
+			TxHash:    donation.TxHash,
+		})
+	}
+	h.Success(w, http.StatusOK, "DONATIONS_RETRIEVED", "Donations retrieved successfully.", response)
 }
 
 func (h *SupporterHandler) HandleReplaceProfile(w http.ResponseWriter, r *http.Request) {
