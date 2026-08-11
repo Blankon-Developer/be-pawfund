@@ -287,6 +287,152 @@ func TestPostgresCampaignRepositoryFindPublicByContractAddress(t *testing.T) {
 	}
 }
 
+func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+	fundraiser := newFundraiser("donor-list@example.com", "0xDonorListFundraiser", nil)
+	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+
+	createdAt := time.Date(2026, 8, 8, 8, 0, 0, 0, time.UTC)
+	campaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Donor List Campaign",
+		"Campaign with donor aggregation",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusDeployed,
+		10_000,
+		2_100,
+		createdAt,
+	)
+	var contractAddress string
+	if err := testDatabase.QueryRowContext(
+		t.Context(),
+		`SELECT contract_address FROM campaigns WHERE id = $1`,
+		campaignID,
+	).Scan(&contractAddress); err != nil {
+		t.Fatalf("get campaign contract address: %v", err)
+	}
+
+	registeredImage := "profiles/registered-donor.png"
+	registered := newSupporter("registered-donor@example.com", "0xRegisteredDonor", &registeredImage)
+	deleted := newSupporter("deleted-donor@example.com", "0xDeletedDonor", nil)
+	mustCreateSupporter(t, supporterRepo, registered)
+	mustCreateSupporter(t, supporterRepo, deleted)
+
+	mustCreateDonationForAddress(t, campaignID, &registered.ID, registered.WalletAddress, 200, "0xRegisteredFirst", createdAt.Add(time.Hour), 10, 0)
+	mustCreateDonationForAddress(t, campaignID, &registered.ID, registered.WalletAddress, 300, "0xRegisteredLatest", createdAt.Add(3*time.Hour), 12, 0)
+	mustCreateDonationForAddress(t, campaignID, nil, "0xGuestDonor", 400, "0xGuestFirst", createdAt.Add(2*time.Hour), 11, 0)
+	mustCreateDonationForAddress(t, campaignID, nil, "0xguestdonor", 300, "0xGuestLatest", createdAt.Add(4*time.Hour), 13, 0)
+	mustCreateDonationForAddress(t, campaignID, &deleted.ID, deleted.WalletAddress, 900, "0xDeleted", createdAt.Add(30*time.Minute), 9, 0)
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`,
+		deleted.ID,
+	); err != nil {
+		t.Fatalf("soft-delete donor profile: %v", err)
+	}
+
+	recent, err := campaignRepo.ListPublicDonorsByContractAddress(
+		t.Context(),
+		strings.ToLower(contractAddress),
+		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 2},
+	)
+	if err != nil {
+		t.Fatalf("ListPublicDonorsByContractAddress(recent) unexpected error: %v", err)
+	}
+	if len(recent) != 2 || recent[0].WalletAddress != "0xguestdonor" || recent[0].Amount != 700 || !recent[0].DonatedAt.Equal(createdAt.Add(4*time.Hour)) {
+		t.Fatalf("recent donors = %#v", recent)
+	}
+	if recent[0].Name != nil || recent[0].ImageObjectKey != nil {
+		t.Errorf("unregistered donor profile = %#v", recent[0])
+	}
+	if recent[1].WalletAddress != registered.WalletAddress || recent[1].Amount != 500 || recent[1].Name == nil || *recent[1].Name != registered.Name || recent[1].ImageObjectKey == nil || *recent[1].ImageObjectKey != registeredImage {
+		t.Errorf("registered donor = %#v", recent[1])
+	}
+
+	top, err := campaignRepo.ListPublicDonorsByContractAddress(
+		t.Context(),
+		contractAddress,
+		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 1, PageSize: 2},
+	)
+	if err != nil {
+		t.Fatalf("ListPublicDonorsByContractAddress(top) unexpected error: %v", err)
+	}
+	if len(top) != 2 || top[0].WalletAddress != deleted.WalletAddress || top[0].Amount != 900 || top[0].Name != nil || top[1].Amount != 700 {
+		t.Errorf("top donors = %#v", top)
+	}
+
+	secondPage, err := campaignRepo.ListPublicDonorsByContractAddress(
+		t.Context(),
+		contractAddress,
+		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 2},
+	)
+	if err != nil || len(secondPage) != 1 || secondPage[0].WalletAddress != registered.WalletAddress {
+		t.Errorf("top second page = %#v, err=%v", secondPage, err)
+	}
+
+	emptyCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Empty Donor Campaign",
+		"Campaign without donors",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusDeployed,
+		10_000,
+		0,
+		createdAt.Add(time.Minute),
+	)
+	var emptyAddress string
+	if err := testDatabase.QueryRowContext(
+		t.Context(),
+		`SELECT contract_address FROM campaigns WHERE id = $1`,
+		emptyCampaignID,
+	).Scan(&emptyAddress); err != nil {
+		t.Fatalf("get empty campaign address: %v", err)
+	}
+	empty, err := campaignRepo.ListPublicDonorsByContractAddress(
+		t.Context(),
+		emptyAddress,
+		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 10},
+	)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Errorf("empty campaign donors = %#v, err=%v", empty, err)
+	}
+
+	hiddenCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Hidden Campaign",
+		"Pending campaign",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusPending,
+		10_000,
+		0,
+		createdAt.Add(2*time.Minute),
+	)
+	const hiddenAddress = "0xHiddenDonorCampaign"
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`UPDATE campaigns SET contract_address = $1 WHERE id = $2`,
+		hiddenAddress,
+		hiddenCampaignID,
+	); err != nil {
+		t.Fatalf("set hidden campaign address: %v", err)
+	}
+	options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 10}
+	if _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), hiddenAddress, options); !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("hidden campaign error = %v, want ErrCampaignNotFound", err)
+	}
+	if _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), "0xUnknown", options); !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("unknown campaign error = %v, want ErrCampaignNotFound", err)
+	}
+}
+
 func newPendingCampaign(endAt time.Time, idempotencyKey string) domain.Campaign {
 	return domain.Campaign{
 		ID:               uuid.New(),

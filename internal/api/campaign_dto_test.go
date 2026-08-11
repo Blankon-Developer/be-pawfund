@@ -179,6 +179,70 @@ func TestCampaignListOptionsFromQuery(t *testing.T) {
 	}
 }
 
+func TestCampaignDonorListOptionsFromQuery(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       url.Values
+		wantOptions domain.CampaignDonorListOptions
+		wantErrors  httpx.FieldErrors
+	}{
+		{
+			name:  "uses recent pagination defaults",
+			query: url.Values{},
+			wantOptions: domain.CampaignDonorListOptions{
+				Sort:     domain.CampaignDonorListSortRecent,
+				Page:     1,
+				PageSize: 10,
+			},
+		},
+		{
+			name: "normalizes valid options",
+			query: url.Values{
+				"sortBy":   {" top "},
+				"page":     {"2"},
+				"pageSize": {"25"},
+			},
+			wantOptions: domain.CampaignDonorListOptions{
+				Sort:     domain.CampaignDonorListSortTop,
+				Page:     2,
+				PageSize: 25,
+			},
+		},
+		{
+			name: "rejects invalid options",
+			query: url.Values{
+				"sortBy":   {"largest"},
+				"page":     {"zero"},
+				"pageSize": {"101"},
+			},
+			wantErrors: httpx.FieldErrors{
+				"sortBy":   {"sortBy must be one of recent or top!"},
+				"page":     {"page must be a positive integer!"},
+				"pageSize": {"pageSize must be an integer between 1 and 100!"},
+			},
+		},
+		{
+			name:  "rejects overflowing offset",
+			query: url.Values{"page": {strconv.FormatInt(math.MaxInt64, 10)}},
+			wantErrors: httpx.FieldErrors{
+				"page": {"page is too large!"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotOptions, gotErrors := campaignDonorListOptionsFromQuery(test.query)
+			if !reflect.DeepEqual(gotErrors, test.wantErrors) {
+				t.Errorf("errors = %#v, want %#v", gotErrors, test.wantErrors)
+			}
+			if test.wantErrors == nil && !reflect.DeepEqual(gotOptions, test.wantOptions) {
+				t.Errorf("options = %#v, want %#v", gotOptions, test.wantOptions)
+			}
+		})
+	}
+}
+
 func campaignStatusPointer(status domain.CampaignStatus) *domain.CampaignStatus {
 	return &status
 }

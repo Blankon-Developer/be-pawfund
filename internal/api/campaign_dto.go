@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	defaultCampaignListPage     int64 = 1
-	defaultCampaignListPageSize int64 = 10
-	maxCampaignListPageSize     int64 = 100
+	defaultCampaignListPage          int64 = 1
+	defaultCampaignListPageSize      int64 = 10
+	maxCampaignListPageSize          int64 = 100
+	defaultCampaignDonorListPage     int64 = 1
+	defaultCampaignDonorListPageSize int64 = 10
+	maxCampaignDonorListPageSize     int64 = 100
 )
 
 type createCampaignRequest struct {
@@ -245,4 +248,59 @@ type publicCampaignDetailResponse struct {
 	Country          string                `json:"country"`
 	ZipCode          string                `json:"zipCode"`
 	Status           domain.CampaignStatus `json:"status"`
+}
+
+type publicCampaignDonorsItemResponse struct {
+	Name      *string `json:"name"`
+	Address   string  `json:"address"`
+	ImageURL  *string `json:"imageUrl"`
+	Amount    int64   `json:"amount"`
+	DonatedOn string  `json:"donatedOn"`
+}
+
+func campaignDonorListOptionsFromQuery(query url.Values) (domain.CampaignDonorListOptions, httpx.FieldErrors) {
+	options := domain.CampaignDonorListOptions{
+		Sort:     domain.CampaignDonorListSortRecent,
+		Page:     defaultCampaignDonorListPage,
+		PageSize: defaultCampaignDonorListPageSize,
+	}
+	fieldErrors := make(httpx.FieldErrors)
+
+	if rawSort, ok := query["sortBy"]; ok {
+		switch sort := strings.TrimSpace(firstQueryValue(rawSort)); sort {
+		case "", string(domain.CampaignDonorListSortRecent):
+			options.Sort = domain.CampaignDonorListSortRecent
+		case string(domain.CampaignDonorListSortTop):
+			options.Sort = domain.CampaignDonorListSortTop
+		default:
+			fieldErrors.Add("sortBy", "sortBy must be one of recent or top!")
+		}
+	}
+
+	if rawPage, ok := query["page"]; ok {
+		page, valid := parsePositiveInt64(firstQueryValue(rawPage))
+		if !valid {
+			fieldErrors.Add("page", "page must be a positive integer!")
+		} else {
+			options.Page = page
+		}
+	}
+
+	if rawPageSize, ok := query["pageSize"]; ok {
+		pageSize, valid := parsePositiveInt64(firstQueryValue(rawPageSize))
+		if !valid || pageSize > maxCampaignDonorListPageSize {
+			fieldErrors.Add("pageSize", "pageSize must be an integer between 1 and 100!")
+		} else {
+			options.PageSize = pageSize
+		}
+	}
+
+	if _, pageInvalid := fieldErrors["page"]; !pageInvalid && options.Page-1 > math.MaxInt64/options.PageSize {
+		fieldErrors.Add("page", "page is too large!")
+	}
+
+	if len(fieldErrors) == 0 {
+		return options, nil
+	}
+	return domain.CampaignDonorListOptions{}, fieldErrors
 }

@@ -446,6 +446,10 @@ func TestPostgresSupporterRepositoryListDonationsByWalletAddress(t *testing.T) {
 	mustCreateDonation(t, campaignID, owner.ID, 2_000_000, "0xMiddle", middle, 11, 0)
 	mustCreateDonation(t, campaignID, owner.ID, 3_000_000, "0xNewest", newest, 12, 0)
 	mustCreateDonation(t, campaignID, other.ID, 9_000_000, "0xOther", newest.Add(time.Hour), 13, 0)
+	const lateWallet = "0xLateSupporter"
+	mustCreateDonationForAddress(t, campaignID, nil, lateWallet, 4_000_000, "0xBeforeRegistration", oldest.Add(-time.Hour), 9, 0)
+	late := newSupporter("late@example.com", lateWallet, nil)
+	mustCreateSupporter(t, repo, late)
 
 	firstPage, found, err := repo.ListDonationsByWalletAddress(
 		t.Context(),
@@ -475,6 +479,15 @@ func TestPostgresSupporterRepositoryListDonationsByWalletAddress(t *testing.T) {
 	}
 	if len(secondPage) != 1 || secondPage[0].TxHash != "0xOldest" {
 		t.Errorf("second page = %#v", secondPage)
+	}
+
+	lateDonations, found, err := repo.ListDonationsByWalletAddress(
+		t.Context(),
+		strings.ToLower(lateWallet),
+		domain.DonationListOptions{Page: 1, PageSize: 10},
+	)
+	if err != nil || !found || len(lateDonations) != 1 || lateDonations[0].TxHash != "0xBeforeRegistration" {
+		t.Errorf("pre-registration donations = %#v, found=%v, err=%v", lateDonations, found, err)
 	}
 
 	emptyPage, found, err := repo.ListDonationsByWalletAddress(
@@ -557,6 +570,39 @@ func mustCreateDonation(
 	logIndex int,
 ) {
 	t.Helper()
+	var donorAddress string
+	if err := testDatabase.QueryRowContext(
+		t.Context(),
+		`SELECT wallet_address FROM users WHERE id = $1`,
+		supporterID,
+	).Scan(&donorAddress); err != nil {
+		t.Fatalf("get donation supporter wallet: %v", err)
+	}
+	mustCreateDonationForAddress(
+		t,
+		campaignID,
+		&supporterID,
+		donorAddress,
+		amount,
+		txHash,
+		createdAt,
+		blockNumber,
+		logIndex,
+	)
+}
+
+func mustCreateDonationForAddress(
+	t *testing.T,
+	campaignID uuid.UUID,
+	supporterID *uuid.UUID,
+	donorAddress string,
+	amount int64,
+	txHash string,
+	createdAt time.Time,
+	blockNumber int,
+	logIndex int,
+) {
+	t.Helper()
 	eventID := uuid.New()
 	if _, err := testDatabase.ExecContext(
 		t.Context(),
@@ -572,11 +618,12 @@ func mustCreateDonation(
 	}
 	if _, err := testDatabase.ExecContext(
 		t.Context(),
-		`INSERT INTO donations (id, campaign_id, supporter_id, event_id, amount)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO donations (id, campaign_id, supporter_id, donor_address, event_id, amount)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		uuid.New(),
 		campaignID,
 		supporterID,
+		donorAddress,
 		eventID,
 		amount,
 	); err != nil {

@@ -145,13 +145,13 @@ func (r *PostgresSupporterRepository) ListDonationsByWalletAddress(
 		FROM donations d
 		JOIN campaigns c ON c.id = d.campaign_id
 		JOIN blockchain_events be ON be.id = d.event_id
-		WHERE d.supporter_id = $1
+		WHERE LOWER(d.donor_address) = LOWER($1)
 		ORDER BY be.created_at DESC, be.block_number DESC, be.log_index DESC, d.id DESC
 		LIMIT $2 OFFSET $3
 	`
 
 	offset := (options.Page - 1) * options.PageSize
-	rows, err := r.db.QueryContext(ctx, query, supporterID, options.PageSize, offset)
+	rows, err := r.db.QueryContext(ctx, query, strings.TrimSpace(walletAddress), options.PageSize, offset)
 	if err != nil {
 		return nil, true, fmt.Errorf("repository: list supporter donations: %w", err)
 	}

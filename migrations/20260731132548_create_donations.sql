@@ -2,13 +2,15 @@
 CREATE TABLE IF NOT EXISTS donations (
   id UUID PRIMARY KEY,
   campaign_id UUID NOT NULL REFERENCES campaigns(id),
-  supporter_id UUID NOT NULL REFERENCES supporters(id),
+  supporter_id UUID REFERENCES supporters(id),
+  donor_address VARCHAR(255) NOT NULL CHECK (BTRIM(donor_address) <> ''),
   event_id UUID UNIQUE NOT NULL REFERENCES blockchain_events(id),
   amount BIGINT NOT NULL CHECK (amount > 0)
 );
 
 CREATE INDEX donations_campaign_id_idx ON donations(campaign_id);
 CREATE INDEX donations_supporter_id_idx ON donations(supporter_id);
+CREATE INDEX donations_donor_address_lower_idx ON donations(LOWER(donor_address));
 
 -- +goose Down
 DROP TABLE IF EXISTS donations;

@@ -19,6 +19,11 @@ var (
 type CampaignRepository interface {
 	ListPublic(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, error)
 	FindPublicByContractAddress(ctx context.Context, contractAddress string) (domain.PublicCampaignDetail, error)
+	ListPublicDonorsByContractAddress(
+		ctx context.Context,
+		contractAddress string,
+		options domain.CampaignDonorListOptions,
+	) ([]domain.PublicCampaignDonor, error)
 	ListForFundraiser(
 		ctx context.Context,
 		walletAddress string,

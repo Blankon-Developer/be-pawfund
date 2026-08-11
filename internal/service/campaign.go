@@ -72,6 +72,25 @@ func (s *CampaignService) GetPublicCampaignDetail(
 	return campaign, nil
 }
 
+func (s *CampaignService) ListPublicCampaignDonors(
+	ctx context.Context,
+	contractAddress string,
+	options domain.CampaignDonorListOptions,
+) ([]domain.PublicCampaignDonor, error) {
+	donors, err := s.repository.ListPublicDonorsByContractAddress(
+		ctx,
+		strings.TrimSpace(contractAddress),
+		options,
+	)
+	if err != nil {
+		if errors.Is(err, repository.ErrCampaignNotFound) {
+			return nil, ErrCampaignNotFound
+		}
+		return nil, fmt.Errorf("service: list public campaign donors: %w", err)
+	}
+	return donors, nil
+}
+
 func (s *CampaignService) ListMyCampaigns(
 	ctx context.Context,
 	walletAddress string,

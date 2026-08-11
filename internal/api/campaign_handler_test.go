@@ -38,6 +38,10 @@ type campaignServiceStub struct {
 	publicGetErr      error
 	publicGetCalls    int
 	publicAddress     string
+	publicDonors      []domain.PublicCampaignDonor
+	publicDonorsErr   error
+	publicDonorCalls  int
+	publicDonorOpts   domain.CampaignDonorListOptions
 	retrieved         domain.Campaign
 	getErr            error
 	getCalls          int
@@ -67,6 +71,20 @@ func (s *campaignServiceStub) GetPublicCampaignDetail(
 		return domain.PublicCampaignDetail{}, s.publicGetErr
 	}
 	return s.publicRetrieved, nil
+}
+
+func (s *campaignServiceStub) ListPublicCampaignDonors(
+	_ context.Context,
+	contractAddress string,
+	options domain.CampaignDonorListOptions,
+) ([]domain.PublicCampaignDonor, error) {
+	s.publicDonorCalls++
+	s.publicAddress = contractAddress
+	s.publicDonorOpts = options
+	if s.publicDonorsErr != nil {
+		return nil, s.publicDonorsErr
+	}
+	return s.publicDonors, nil
 }
 
 func (s *campaignServiceStub) Create(
@@ -635,6 +653,130 @@ func TestCampaignHandlerHandleGetPublicCampaignDetail(t *testing.T) {
 			}
 			if data.ImageURL != "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png" || data.Fundraiser.ImageURL != nil {
 				t.Errorf("response image URLs = %#v", data)
+			}
+		})
+	}
+}
+
+func TestCampaignHandlerHandleGetPublicCampaignDonors(t *testing.T) {
+	donatedAt := time.Date(2026, 8, 10, 11, 30, 0, 0, time.FixedZone("WIB", 7*60*60))
+	donorName := "Animal Friend"
+	imageObjectKey := "profiles/friend photo.png"
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		query        string
+		donors       []domain.PublicCampaignDonor
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+	}{
+		{
+			name:  "returns aggregated donors with optional profiles",
+			query: "?sortBy=top&page=2&pageSize=25",
+			donors: []domain.PublicCampaignDonor{
+				{
+					Name:           &donorName,
+					WalletAddress:  "0xRegistered",
+					ImageObjectKey: &imageObjectKey,
+					Amount:         3_000_000,
+					DonatedAt:      donatedAt,
+				},
+				{WalletAddress: "0xUnregistered", Amount: 1_000_000, DonatedAt: donatedAt.Add(-time.Hour)},
+			},
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGN_DONORS_RETRIEVED",
+			wantCalls: 1,
+		},
+		{
+			name:      "returns a non-null empty array",
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGN_DONORS_RETRIEVED",
+			wantCalls: 1,
+		},
+		{
+			name:      "rejects invalid query options",
+			query:     "?sortBy=largest&page=0&pageSize=101",
+			wantHTTP:  http.StatusUnprocessableEntity,
+			wantCode:  "VALIDATION_ERROR",
+			wantCalls: 0,
+		},
+		{
+			name:         "maps a missing campaign",
+			serviceError: service.ErrCampaignNotFound,
+			wantHTTP:     http.StatusNotFound,
+			wantCode:     "CAMPAIGN_NOT_FOUND",
+			wantCalls:    1,
+		},
+		{
+			name:         "hides an unexpected failure",
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &campaignServiceStub{
+				publicDonors:    test.donors,
+				publicDonorsErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewCampaignHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/0xCampaign/donors"+test.query, nil)
+			routeContext := chi.NewRouteContext()
+			routeContext.URLParams.Add("address", " 0xCampaign ")
+			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+			response := httptest.NewRecorder()
+
+			handler.HandleGetPublicCampaignDonors(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if response.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+			}
+			if serviceStub.publicDonorCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.publicDonorCalls, test.wantCalls)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+			if serviceStub.publicAddress != "0xCampaign" {
+				t.Errorf("service address = %q, want trimmed address", serviceStub.publicAddress)
+			}
+			if test.query != "" && (serviceStub.publicDonorOpts.Sort != domain.CampaignDonorListSortTop || serviceStub.publicDonorOpts.Page != 2 || serviceStub.publicDonorOpts.PageSize != 25) {
+				t.Errorf("service options = %#v", serviceStub.publicDonorOpts)
+			}
+			if test.donors == nil {
+				if string(decoded.Data) != "[]" {
+					t.Errorf("empty response data = %s, want []", decoded.Data)
+				}
+				return
+			}
+
+			var data []publicCampaignDonorsItemResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode donor data: %v", err)
+			}
+			if len(data) != 2 || data[0].Name == nil || *data[0].Name != donorName || data[0].Address != "0xRegistered" || data[0].Amount != 3_000_000 || data[0].DonatedOn != "2026-08-10T04:30:00Z" {
+				t.Errorf("registered donor response = %#v", data)
+			}
+			wantImageURL := "https://cdn.example.com/pawfund/profiles/friend%20photo.png"
+			if data[0].ImageURL == nil || *data[0].ImageURL != wantImageURL || data[1].Name != nil || data[1].ImageURL != nil {
+				t.Errorf("optional donor fields = %#v", data)
 			}
 		})
 	}

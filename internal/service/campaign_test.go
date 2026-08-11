@@ -32,6 +32,10 @@ type campaignRepositoryStub struct {
 	publicFindErr     error
 	publicFindCalls   int
 	publicAddress     string
+	publicDonors      []domain.PublicCampaignDonor
+	publicDonorsErr   error
+	publicDonorCalls  int
+	publicDonorOpts   domain.CampaignDonorListOptions
 	retrieved         domain.Campaign
 	findErr           error
 	findCalls         int
@@ -61,6 +65,20 @@ func (s *campaignRepositoryStub) FindPublicByContractAddress(
 		return domain.PublicCampaignDetail{}, s.publicFindErr
 	}
 	return s.publicRetrieved, nil
+}
+
+func (s *campaignRepositoryStub) ListPublicDonorsByContractAddress(
+	_ context.Context,
+	contractAddress string,
+	options domain.CampaignDonorListOptions,
+) ([]domain.PublicCampaignDonor, error) {
+	s.publicDonorCalls++
+	s.publicAddress = contractAddress
+	s.publicDonorOpts = options
+	if s.publicDonorsErr != nil {
+		return nil, s.publicDonorsErr
+	}
+	return s.publicDonors, nil
 }
 
 func (s *campaignRepositoryStub) ListForFundraiser(
@@ -327,6 +345,50 @@ func TestCampaignServiceGetPublicCampaignDetail(t *testing.T) {
 			}
 			if test.wantError == nil && campaign.Title != "Emergency Rescue" {
 				t.Errorf("campaign = %#v", campaign)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceListPublicCampaignDonors(t *testing.T) {
+	repositoryFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name            string
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns public campaign donors"},
+		{name: "maps campaign not found", repositoryError: repository.ErrCampaignNotFound, wantError: ErrCampaignNotFound},
+		{name: "wraps repository failure", repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{
+				publicDonors:    []domain.PublicCampaignDonor{{WalletAddress: "0xDonor", Amount: 100}},
+				publicDonorsErr: test.repositoryError,
+			}
+			campaignService := NewCampaignService(repo, nil)
+			options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 25}
+
+			donors, err := campaignService.ListPublicCampaignDonors(t.Context(), " 0xCaMpAiGn ", options)
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ListPublicCampaignDonors() error = %v, want %v", err, test.wantError)
+				}
+				if test.repositoryError == repositoryFailure && !strings.Contains(err.Error(), "list public campaign donors") {
+					t.Errorf("ListPublicCampaignDonors() error lacks operation context: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("ListPublicCampaignDonors() unexpected error: %v", err)
+			}
+			if repo.publicDonorCalls != 1 || repo.publicAddress != "0xCaMpAiGn" || repo.publicDonorOpts != options {
+				t.Errorf("repository input = calls:%d address:%q options:%#v", repo.publicDonorCalls, repo.publicAddress, repo.publicDonorOpts)
+			}
+			if test.wantError == nil && (len(donors) != 1 || donors[0].WalletAddress != "0xDonor") {
+				t.Errorf("donors = %#v", donors)
 			}
 		})
 	}

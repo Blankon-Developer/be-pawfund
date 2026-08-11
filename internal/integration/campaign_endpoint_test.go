@@ -574,6 +574,91 @@ func TestGetPublicCampaignDetailEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiser := newFundraiser("campaign-donors@example.com", "0xCampaignDonorFundraiser", nil)
+	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+	createdAt := time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
+	campaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Public Donor Campaign",
+		"Campaign donor endpoint",
+		domain.CampaignStatusActive,
+		domain.CampaignDeploymentStatusDeployed,
+		10_000,
+		350,
+		createdAt,
+	)
+	var contractAddress string
+	if err := testDatabase.QueryRowContext(
+		t.Context(),
+		`SELECT contract_address FROM campaigns WHERE id = $1`,
+		campaignID,
+	).Scan(&contractAddress); err != nil {
+		t.Fatalf("get campaign contract address: %v", err)
+	}
+
+	imageObjectKey := "profiles/public-donor.png"
+	supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+	donor := newSupporter("public-donor@example.com", "0xPublicDonor", &imageObjectKey)
+	mustCreateSupporter(t, supporterRepo, donor)
+	mustCreateDonationForAddress(t, campaignID, &donor.ID, donor.WalletAddress, 100, "0xPublicDonorFirst", createdAt.Add(time.Hour), 10, 0)
+	mustCreateDonationForAddress(t, campaignID, &donor.ID, donor.WalletAddress, 200, "0xPublicDonorLatest", createdAt.Add(2*time.Hour), 11, 0)
+	mustCreateDonationForAddress(t, campaignID, nil, "0xGuest", 50, "0xGuestDonor", createdAt.Add(3*time.Hour), 12, 0)
+
+	router, _ := newCampaignIntegrationRouter(t)
+	response := requestPublicCampaignDonors(t, router, strings.ToLower(contractAddress), "?sortBy=top&page=1&pageSize=1")
+	if response.Code != http.StatusOK {
+		t.Fatalf("donor list status = %d; body: %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
+	}
+	var envelope struct {
+		Status string `json:"status"`
+		Code   string `json:"code"`
+		Data   []struct {
+			Name      *string `json:"name"`
+			Address   string  `json:"address"`
+			ImageURL  *string `json:"imageUrl"`
+			Amount    int64   `json:"amount"`
+			DonatedOn string  `json:"donatedOn"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode donor list response: %v", err)
+	}
+	wantImageURL := "https://cdn.example.com/pawfund/profiles/public-donor.png"
+	if envelope.Status != "success" || envelope.Code != "CAMPAIGN_DONORS_RETRIEVED" || len(envelope.Data) != 1 {
+		t.Fatalf("donor list envelope = %#v", envelope)
+	}
+	if envelope.Data[0].Name == nil || *envelope.Data[0].Name != donor.Name || envelope.Data[0].Address != donor.WalletAddress || envelope.Data[0].ImageURL == nil || *envelope.Data[0].ImageURL != wantImageURL || envelope.Data[0].Amount != 300 || envelope.Data[0].DonatedOn != "2026-08-09T10:00:00Z" {
+		t.Errorf("donor list item = %#v", envelope.Data[0])
+	}
+
+	emptyPage := requestPublicCampaignDonors(t, router, contractAddress, "?page=3&pageSize=1")
+	var emptyEnvelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if emptyPage.Code != http.StatusOK || json.Unmarshal(emptyPage.Body.Bytes(), &emptyEnvelope) != nil || string(emptyEnvelope.Data) != "[]" {
+		t.Errorf("empty donor page status/body = %d/%s", emptyPage.Code, emptyPage.Body.String())
+	}
+
+	invalid := decodeAuthEndpointResult(t, requestPublicCampaignDonors(t, router, contractAddress, "?sortBy=largest&page=0&pageSize=101"))
+	if invalid.HTTPStatus != http.StatusUnprocessableEntity || invalid.Code != "VALIDATION_ERROR" {
+		t.Errorf("invalid donor query = %d/%q; body: %s", invalid.HTTPStatus, invalid.Code, invalid.Body)
+	}
+
+	notFound := decodeAuthEndpointResult(t, requestPublicCampaignDonors(t, router, "0xUnknownCampaign", ""))
+	if notFound.HTTPStatus != http.StatusNotFound || notFound.Code != "CAMPAIGN_NOT_FOUND" {
+		t.Errorf("unknown donor campaign = %d/%q; body: %s", notFound.HTTPStatus, notFound.Code, notFound.Body)
+	}
+}
+
 func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -658,6 +743,19 @@ func requestPublicCampaignDetail(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+contractAddress, nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func requestPublicCampaignDonors(
+	t *testing.T,
+	router http.Handler,
+	contractAddress string,
+	query string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/v1/campaigns/"+contractAddress+"/donors"+query, nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response

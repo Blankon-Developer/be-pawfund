@@ -975,47 +975,65 @@
       "get": {
         "tags": ["Public Campaigns"],
         "summary": "List Campaign Donors",
+        "description": "List donors for a deployed public campaign. Donations are grouped case-insensitively by wallet address; amount is the gross aggregate donated by that wallet and donatedOn is its latest donation time. Active supporter profiles enrich the optional name and imageUrl fields.",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Campaign donors retrieved successfully.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
             "content": {
               "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "properties": {
-                          "name": { "type": "string" },
-                          "address": { "type": "string" },
-                          "imageUrl": { "type": "string" },
-                          "amount": { "type": "number" },
-                          "donatedOn": { "type": "string" }
-                        },
-                        "type": "object",
-                        "required": [
-                          "name",
-                          "address",
-                          "imageUrl",
-                          "amount",
-                          "donatedOn"
-                        ]
-                      }
-                    }
-                  },
-                  "required": ["code", "message", "data"]
-                }
+                "schema": { "$ref": "#/components/schemas/PublicCampaignDonorsSuccessResponse" }
+              }
+            }
+          },
+          "404": {
+            "description": "No deployed public campaign matches the supplied contract address.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CampaignNotFoundError" }
+              }
+            }
+          },
+          "422": {
+            "description": "One or more sorting or pagination parameters are invalid.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CampaignDonorListValidationError" }
+              }
+            }
+          },
+          "500": {
+            "description": "An unexpected server error occurred while listing campaign donors.",
+            "headers": {
+              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/InternalServerError" }
               }
             }
           }
         },
         "parameters": [
           {
+            "in": "path",
+            "name": "address",
+            "description": "Deployed campaign contract address. Matching is case-insensitive.",
+            "schema": { "type": "string" },
+            "required": true
+          },
+          {
             "in": "query",
             "name": "sortBy",
+            "description": "Sort by the latest donation time or by gross aggregate donation amount.",
             "schema": {
               "type": "string",
               "enum": ["recent", "top"],
@@ -1023,14 +1041,28 @@
             }
           },
           {
-            "in": "path",
-            "name": "address",
-            "schema": { "type": "string" },
-            "required": true
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            }
           }
         ],
-        "operationId": "get_campaigns-2",
-        "description": "To get a list of everyone who donated to this campaign"
+        "operationId": "get_campaigns-address-donors"
       }
     },
     "/fundraiser/{address}": {
@@ -1989,7 +2021,7 @@
     },
     "headers": {
       "NoStoreCacheControl": {
-        "description": "Authentication responses must not be stored by caches.",
+        "description": "The response must not be stored by caches.",
         "schema": { "type": "string", "enum": ["no-store"] }
       },
       "AuthorizationVary": {
@@ -2264,6 +2296,82 @@
           "errors": { "type": "object", "nullable": true }
         },
         "required": ["status", "code", "message", "data", "errors"]
+      },
+      "PublicCampaignDonorsSuccessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "enum": ["success"] },
+          "code": { "type": "string", "enum": ["CAMPAIGN_DONORS_RETRIEVED"] },
+          "message": { "type": "string", "default": "Campaign donors retrieved successfully." },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Active supporter profile name, or null when no active profile exists."
+                },
+                "address": { "type": "string", "description": "Donor wallet address." },
+                "imageUrl": {
+                  "type": "string",
+                  "format": "uri",
+                  "nullable": true,
+                  "description": "Active supporter profile image URL, or null when unavailable."
+                },
+                "amount": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Gross aggregate donation amount in atomic USDC units. Refunds are not deducted."
+                },
+                "donatedOn": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "UTC timestamp of the wallet's latest indexed donation event."
+                }
+              },
+              "required": ["name", "address", "imageUrl", "amount", "donatedOn"]
+            }
+          },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["status", "code", "message", "data", "errors"]
+      },
+      "CampaignNotFoundError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["CAMPAIGN_NOT_FOUND"] },
+              "message": { "type": "string", "default": "No public campaign was found for the requested contract address." }
+            }
+          }
+        ]
+      },
+      "CampaignDonorListValidationError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AuthErrorResponse" },
+          {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "enum": ["VALIDATION_ERROR"] },
+              "message": { "type": "string", "default": "One or more fields are invalid." },
+              "errors": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sortBy": { "type": "array", "items": { "type": "string" } },
+                  "page": { "type": "array", "items": { "type": "string" } },
+                  "pageSize": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        ]
       },
       "SupporterAccessRequiredError": {
         "allOf": [

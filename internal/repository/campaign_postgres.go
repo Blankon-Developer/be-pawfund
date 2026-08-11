@@ -135,6 +135,102 @@ func (r *PostgresCampaignRepository) FindPublicByContractAddress(
 	return campaign, nil
 }
 
+func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
+	ctx context.Context,
+	contractAddress string,
+	options domain.CampaignDonorListOptions,
+) ([]domain.PublicCampaignDonor, error) {
+	const findCampaign = `
+		SELECT c.id
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE LOWER(c.contract_address) = LOWER($1)
+			AND u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND c.deployment_status = 'deployed'
+			AND c.contract_address IS NOT NULL
+	`
+
+	var campaignID uuid.UUID
+	if err := r.db.QueryRowContext(ctx, findCampaign, strings.TrimSpace(contractAddress)).Scan(&campaignID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrCampaignNotFound
+		}
+		return nil, fmt.Errorf("repository: find public campaign for donor list: %w", err)
+	}
+
+	const query = `
+		WITH donor_totals AS (
+			SELECT
+				LOWER(d.donor_address) AS normalized_address,
+				(ARRAY_AGG(
+					d.donor_address
+					ORDER BY be.created_at DESC, be.block_number DESC, be.log_index DESC, d.id DESC
+				))[1] AS donor_address,
+				SUM(d.amount)::BIGINT AS amount,
+				MAX(be.created_at) AS donated_at
+			FROM donations d
+			JOIN blockchain_events be ON be.id = d.event_id
+			WHERE d.campaign_id = $1
+			GROUP BY LOWER(d.donor_address)
+		)
+		SELECT
+			s.name,
+			COALESCE(u.wallet_address, dt.donor_address),
+			s.image_object_key,
+			dt.amount,
+			dt.donated_at
+		FROM donor_totals dt
+		LEFT JOIN users u ON LOWER(u.wallet_address) = dt.normalized_address
+			AND u.role = 'supporter'
+			AND u.deleted_at IS NULL
+		LEFT JOIN supporters s ON s.id = u.id
+	`
+
+	offset := (options.Page - 1) * options.PageSize
+	rows, err := r.db.QueryContext(
+		ctx,
+		query+campaignDonorListOrderBy(options.Sort)+" LIMIT $2 OFFSET $3",
+		campaignID,
+		options.PageSize,
+		offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list public campaign donors: %w", err)
+	}
+	defer rows.Close()
+
+	donors := make([]domain.PublicCampaignDonor, 0)
+	for rows.Next() {
+		var (
+			donor          domain.PublicCampaignDonor
+			name           sql.NullString
+			imageObjectKey sql.NullString
+		)
+		if err := rows.Scan(
+			&name,
+			&donor.WalletAddress,
+			&imageObjectKey,
+			&donor.Amount,
+			&donor.DonatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("repository: scan public campaign donor: %w", err)
+		}
+		if name.Valid {
+			donor.Name = &name.String
+		}
+		if imageObjectKey.Valid {
+			donor.ImageObjectKey = &imageObjectKey.String
+		}
+		donors = append(donors, donor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate public campaign donors: %w", err)
+	}
+	return donors, nil
+}
+
 func (r *PostgresCampaignRepository) ListForFundraiser(
 	ctx context.Context,
 	walletAddress string,
@@ -222,6 +318,15 @@ func campaignListOrderBy(sort domain.CampaignListSort) string {
 		return " ORDER BY c.raised_amount DESC, c.created_at DESC, c.id DESC"
 	default:
 		return " ORDER BY c.created_at DESC, c.id DESC"
+	}
+}
+
+func campaignDonorListOrderBy(sort domain.CampaignDonorListSort) string {
+	switch sort {
+	case domain.CampaignDonorListSortTop:
+		return " ORDER BY dt.amount DESC, dt.donated_at DESC, dt.normalized_address ASC"
+	default:
+		return " ORDER BY dt.donated_at DESC, dt.amount DESC, dt.normalized_address ASC"
 	}
 }
 
