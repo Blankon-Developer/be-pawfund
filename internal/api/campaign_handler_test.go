@@ -25,6 +25,11 @@ type campaignServiceStub struct {
 	err           error
 	calls         int
 	input         service.CreateCampaignInput
+	listed        []domain.Campaign
+	listErr       error
+	listCalls     int
+	listWallet    string
+	listOptions   domain.CampaignListOptions
 	retrieved     domain.Campaign
 	getErr        error
 	getCalls      int
@@ -39,6 +44,20 @@ func (s *campaignServiceStub) Create(
 	s.calls++
 	s.input = input
 	return s.created, s.err
+}
+
+func (s *campaignServiceStub) ListMyCampaigns(
+	_ context.Context,
+	walletAddress string,
+	options domain.CampaignListOptions,
+) ([]domain.Campaign, error) {
+	s.listCalls++
+	s.listWallet = walletAddress
+	s.listOptions = options
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.listed, nil
 }
 
 func (s *campaignServiceStub) GetMyCampaignDetail(
@@ -226,6 +245,126 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 	}
 }
 
+func TestCampaignHandlerHandleGetMyCampaignList(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	endAt := createdAt.Add(30 * 24 * time.Hour)
+	contractAddress := "0xCampaign"
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		query        string
+		principal    *auth.Principal
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+	}{
+		{
+			name:      "returns authenticated fundraiser campaigns",
+			query:     "?search=+rescue+&sortBy=close-to-goal&filter=completed&page=2&pageSize=25",
+			principal: &auth.Principal{WalletAddress: " 0xFundraiser ", Role: domain.UserRoleFundraiser},
+			wantHTTP:  http.StatusOK,
+			wantCode:  "CAMPAIGNS_RETRIEVED",
+			wantCalls: 1,
+		},
+		{
+			name:     "requires an authenticated principal",
+			wantHTTP: http.StatusUnauthorized,
+			wantCode: "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:      "requires fundraiser access",
+			principal: &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			wantHTTP:  http.StatusForbidden,
+			wantCode:  "FUNDRAISER_ACCESS_REQUIRED",
+		},
+		{
+			name:      "rejects invalid query parameters",
+			query:     "?sortBy=popular&page=0",
+			principal: &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			wantHTTP:  http.StatusUnprocessableEntity,
+			wantCode:  "VALIDATION_ERROR",
+		},
+		{
+			name:         "hides unexpected service failure",
+			principal:    &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &campaignServiceStub{
+				listed: []domain.Campaign{
+					{
+						ID:               campaignID,
+						Title:            "Emergency Rescue",
+						ShortDescription: "Help rescued animals",
+						GoalAmount:       10_000_000_000,
+						RaisedAmount:     1_000_000_000,
+						DonorCount:       3,
+						EndAt:            endAt,
+						ImageObjectKey:   "campaigns/rescue photo.png",
+						ContractAddress:  &contractAddress,
+						Status:           domain.CampaignStatusCompleted,
+						CreatedAt:        createdAt,
+					},
+				},
+				listErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewCampaignHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/campaigns"+test.query, nil)
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetMyCampaignList(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if serviceStub.listCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.listCalls, test.wantCalls)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+
+			if serviceStub.listWallet != "0xFundraiser" {
+				t.Errorf("service wallet = %q", serviceStub.listWallet)
+			}
+			if serviceStub.listOptions.Search != "rescue" || serviceStub.listOptions.Sort != domain.CampaignListSortCloseToGoal || serviceStub.listOptions.Status == nil || *serviceStub.listOptions.Status != domain.CampaignStatusCompleted || serviceStub.listOptions.Page != 2 || serviceStub.listOptions.PageSize != 25 {
+				t.Errorf("service options = %#v", serviceStub.listOptions)
+			}
+			var data []myCampaignListItemResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode success data: %v", err)
+			}
+			if len(data) != 1 || data[0].ID != campaignID || data[0].DonorCount != 3 || data[0].ContractAddress == nil || *data[0].ContractAddress != contractAddress {
+				t.Errorf("response data = %#v", data)
+			}
+			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
+			if data[0].ImageURL == nil || *data[0].ImageURL != wantImageURL {
+				t.Errorf("image URL = %#v, want %q", data[0].ImageURL, wantImageURL)
+			}
+		})
+	}
+}
+
 func TestCampaignHandlerHandleGetMyCampaignDetail(t *testing.T) {
 	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
 	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
@@ -344,7 +483,7 @@ func TestCampaignHandlerHandleGetMyCampaignDetail(t *testing.T) {
 			if serviceStub.getWallet != "0xFundraiser" || serviceStub.getCampaignID != campaignID {
 				t.Errorf("service input = %q/%s", serviceStub.getWallet, serviceStub.getCampaignID)
 			}
-			var data campaignResponse
+			var data myCampaignResponse
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode success data: %v", err)
 			}

@@ -46,6 +46,19 @@ func NewCampaignService(repo repository.CampaignRepository, generateID IDGenerat
 	return &CampaignService{repository: repo, generateID: generateID, now: time.Now}
 }
 
+func (s *CampaignService) ListMyCampaigns(
+	ctx context.Context,
+	walletAddress string,
+	options domain.CampaignListOptions,
+) ([]domain.Campaign, error) {
+	options.Search = strings.TrimSpace(options.Search)
+	campaigns, err := s.repository.ListForFundraiser(ctx, strings.TrimSpace(walletAddress), options)
+	if err != nil {
+		return nil, fmt.Errorf("service: list fundraiser campaigns: %w", err)
+	}
+	return campaigns, nil
+}
+
 func (s *CampaignService) GetMyCampaignDetail(
 	ctx context.Context,
 	walletAddress string,

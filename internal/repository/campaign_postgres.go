@@ -20,6 +20,94 @@ func NewPostgresCampaignRepository(db *sql.DB) *PostgresCampaignRepository {
 	return &PostgresCampaignRepository{db: db}
 }
 
+func (r *PostgresCampaignRepository) ListForFundraiser(
+	ctx context.Context,
+	walletAddress string,
+	options domain.CampaignListOptions,
+) ([]domain.Campaign, error) {
+	const query = `
+		SELECT
+			c.id,
+			c.fundraiser_id,
+			c.event_id,
+			c.title,
+			c.short_description,
+			c.story,
+			c.goal_amount,
+			c.raised_amount,
+			c.donor_count,
+			c.contract_address,
+			c.created_at,
+			c.end_at,
+			c.image_object_key,
+			c.country,
+			c.zip_code,
+			c.status,
+			c.deployment_status,
+			c.idempotency_key
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
+			AND (
+				$2 = ''
+				OR c.title ILIKE '%' || $2 || '%'
+				OR c.short_description ILIKE '%' || $2 || '%'
+			)
+			AND ($3::campaign_status IS NULL OR c.status = $3::campaign_status)
+	`
+
+	offset := (options.Page - 1) * options.PageSize
+	rows, err := r.db.QueryContext(
+		ctx,
+		query+campaignListOrderBy(options.Sort)+" LIMIT $4 OFFSET $5",
+		strings.TrimSpace(walletAddress),
+		options.Search,
+		campaignListStatusArgument(options.Status),
+		options.PageSize,
+		offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list campaigns for fundraiser: %w", err)
+	}
+	defer rows.Close()
+
+	campaigns := make([]domain.Campaign, 0)
+	for rows.Next() {
+		campaign, err := scanCampaign(rows)
+		if err != nil {
+			return nil, fmt.Errorf("repository: scan campaign list for fundraiser: %w", err)
+		}
+		campaigns = append(campaigns, campaign)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repository: iterate campaign list for fundraiser: %w", err)
+	}
+	return campaigns, nil
+}
+
+func campaignListStatusArgument(status *domain.CampaignStatus) any {
+	if status == nil {
+		return nil
+	}
+	return string(*status)
+}
+
+func campaignListOrderBy(sort domain.CampaignListSort) string {
+	switch sort {
+	case domain.CampaignListSortOldest:
+		return " ORDER BY c.created_at ASC, c.id ASC"
+	case domain.CampaignListSortCloseToGoal:
+		return " ORDER BY (c.raised_amount::numeric / c.goal_amount) DESC, c.created_at DESC, c.id DESC"
+	case domain.CampaignListSortMostDonated:
+		return " ORDER BY c.raised_amount DESC, c.created_at DESC, c.id DESC"
+	default:
+		return " ORDER BY c.created_at DESC, c.id DESC"
+	}
+}
+
 func (r *PostgresCampaignRepository) FindByIDForFundraiser(
 	ctx context.Context,
 	walletAddress string,

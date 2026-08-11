@@ -507,36 +507,38 @@
       "get": {
         "tags": ["Fundraiser Campaigns"],
         "summary": "List My Campaigns",
+        "description": "List campaigns owned by the authenticated fundraiser. Search matches titles and short descriptions case-insensitively.",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Campaigns retrieved successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"] },
+                    "code": { "type": "string", "enum": ["CAMPAIGNS_RETRIEVED"] },
+                    "message": { "type": "string", "default": "Campaigns retrieved successfully." },
                     "data": {
                       "type": "array",
                       "items": {
+                        "type": "object",
                         "properties": {
-                          "id": { "type": "string" },
+                          "id": { "type": "string", "format": "uuid" },
                           "title": { "type": "string" },
                           "shortDescription": { "type": "string" },
-                          "goalAmount": { "type": "number" },
-                          "raisedAmount": { "type": "number" },
-                          "donorCount": { "type": "number" },
-                          "campaignImageUrl": { "type": "string" },
-                          "endAt": { "type": "string" },
-                          "createdAt": { "type": "string" },
-                          "contractAddress": { "type": "string" },
+                          "goalAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+                          "raisedAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+                          "donorCount": { "type": "integer", "format": "int64" },
+                          "imageUrl": { "type": "string", "format": "uri", "nullable": true },
+                          "endAt": { "type": "string", "format": "date-time" },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "contractAddress": { "type": "string", "nullable": true },
                           "status": {
                             "type": "string",
-                            "enum": ["ACTIVE", "COMPLETED", "CANCELED"]
+                            "enum": ["active", "completed", "cancelled"]
                           }
                         },
-                        "type": "object",
                         "required": [
                           "id",
                           "title",
@@ -544,49 +546,65 @@
                           "goalAmount",
                           "raisedAmount",
                           "donorCount",
-                          "campaignImageUrl",
+                          "imageUrl",
                           "status",
                           "contractAddress",
                           "createdAt",
                           "endAt"
                         ]
                       }
-                    }
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message", "data"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
-          }
+          },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "403": { "description": "The authenticated wallet is not a registered fundraiser." },
+          "422": { "description": "One or more query parameters are invalid." },
+          "500": { "description": "An unexpected server error occurred while listing campaigns." }
         },
         "parameters": [
-          { "in": "query", "name": "search", "schema": { "type": "string" } },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": { "type": "string", "default": "Bearer <jwt>" },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "description": "Case-insensitive partial match against the campaign title or short description.",
+            "schema": { "type": "string" }
+          },
           {
             "in": "query",
             "name": "sortBy",
             "schema": {
               "type": "string",
-              "enum": ["newest", "oldest", "close-to-goal", "most-donated"]
+              "enum": ["newest", "oldest", "close-to-goal", "most-donated"],
+              "default": "newest"
             }
           },
           {
             "in": "query",
             "name": "filter",
-            "schema": { "type": "string", "enum": ["active", "completed"] }
+            "schema": { "type": "string", "enum": ["active", "completed", "cancelled"] }
           },
           {
             "in": "query",
             "name": "page",
-            "schema": { "type": "number", "default": "1" }
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
           },
           {
             "in": "query",
             "name": "pageSize",
-            "schema": { "type": "number", "default": "10" }
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
           }
         ],
-        "description": "Endpoint untuk mendapatkan list campaigns",
-        "operationId": "get_campaigns-3"
+        "operationId": "get_fundraiser-campaigns"
       },
       "post": {
         "tags": ["Fundraiser Campaigns"],

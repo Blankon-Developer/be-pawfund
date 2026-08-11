@@ -24,6 +24,7 @@ const (
 
 type CampaignService interface {
 	Create(ctx context.Context, input service.CreateCampaignInput) (domain.Campaign, error)
+	ListMyCampaigns(ctx context.Context, walletAddress string, options domain.CampaignListOptions) ([]domain.Campaign, error)
 	GetMyCampaignDetail(ctx context.Context, walletAddress string, campaignID uuid.UUID) (domain.Campaign, error)
 }
 
@@ -168,6 +169,66 @@ func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Re
 	h.Success(w, http.StatusCreated, "CAMPAIGN_CREATED", "Campaign created successfully.", response)
 }
 
+func (h *CampaignHandler) HandleGetMyCampaignList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+	if principal.Role != domain.UserRoleFundraiser {
+		h.Error(
+			w,
+			http.StatusForbidden,
+			"FUNDRAISER_ACCESS_REQUIRED",
+			"A registered fundraiser account is required.",
+			nil,
+		)
+		return
+	}
+
+	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query())
+	if fieldErrors != nil {
+		h.ValidationError(w, fieldErrors)
+		return
+	}
+
+	campaigns, err := h.service.ListMyCampaigns(r.Context(), walletAddress, options)
+	if err != nil {
+		h.Logger.Error("list fundraiser campaigns", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	response := make([]myCampaignListItemResponse, 0, len(campaigns))
+	for _, campaign := range campaigns {
+		imageObjectKey := campaign.ImageObjectKey
+		response = append(response, myCampaignListItemResponse{
+			ID:               campaign.ID,
+			Title:            campaign.Title,
+			ShortDescription: campaign.ShortDescription,
+			GoalAmount:       campaign.GoalAmount,
+			RaisedAmount:     campaign.RaisedAmount,
+			DonorCount:       campaign.DonorCount,
+			ImageURL:         h.urlBuilder.Build(&imageObjectKey),
+			EndAt:            campaign.EndAt.UTC().Format(time.RFC3339),
+			CreatedAt:        campaign.CreatedAt.UTC().Format(time.RFC3339),
+			ContractAddress:  campaign.ContractAddress,
+			Status:           campaign.Status,
+		})
+	}
+	h.Success(w, http.StatusOK, "CAMPAIGNS_RETRIEVED", "Campaigns retrieved successfully.", response)
+}
+
 func (h *CampaignHandler) HandleGetMyCampaignDetail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
@@ -222,7 +283,7 @@ func (h *CampaignHandler) HandleGetMyCampaignDetail(w http.ResponseWriter, r *ht
 	}
 
 	imageObjectKey := campaign.ImageObjectKey
-	response := campaignResponse{
+	response := myCampaignResponse{
 		Title:            campaign.Title,
 		ShortDescription: campaign.ShortDescription,
 		Story:            campaign.Story,

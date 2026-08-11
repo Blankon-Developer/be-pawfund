@@ -19,11 +19,30 @@ type campaignRepositoryStub struct {
 	wallet       string
 	campaign     domain.Campaign
 	minimumEndAt time.Time
+	listed       []domain.Campaign
+	listErr      error
+	listCalls    int
+	listWallet   string
+	listOptions  domain.CampaignListOptions
 	retrieved    domain.Campaign
 	findErr      error
 	findCalls    int
 	findWallet   string
 	findID       uuid.UUID
+}
+
+func (s *campaignRepositoryStub) ListForFundraiser(
+	_ context.Context,
+	walletAddress string,
+	options domain.CampaignListOptions,
+) ([]domain.Campaign, error) {
+	s.listCalls++
+	s.listWallet = walletAddress
+	s.listOptions = options
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.listed, nil
 }
 
 func (s *campaignRepositoryStub) FindByIDForFundraiser(
@@ -135,6 +154,56 @@ func TestCampaignServiceCreate(t *testing.T) {
 			}
 			if test.wantError == nil && created.ID != fixedID {
 				t.Errorf("created campaign = %#v", created)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceListMyCampaigns(t *testing.T) {
+	repositoryFailure := errors.New("database unavailable")
+	status := domain.CampaignStatusActive
+
+	tests := []struct {
+		name            string
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns owned campaigns"},
+		{name: "wraps repository failure", repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{
+				listed:  []domain.Campaign{{Title: "Emergency Rescue"}},
+				listErr: test.repositoryError,
+			}
+			campaignService := NewCampaignService(repo, nil)
+			options := domain.CampaignListOptions{
+				Search:   " rescue ",
+				Sort:     domain.CampaignListSortMostDonated,
+				Status:   &status,
+				Page:     2,
+				PageSize: 25,
+			}
+
+			campaigns, err := campaignService.ListMyCampaigns(t.Context(), " 0xFundraiser ", options)
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("ListMyCampaigns() error = %v, want %v", err, test.wantError)
+				}
+				if !strings.Contains(err.Error(), "list fundraiser campaigns") {
+					t.Errorf("ListMyCampaigns() error lacks operation context: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("ListMyCampaigns() unexpected error: %v", err)
+			}
+			if repo.listCalls != 1 || repo.listWallet != "0xFundraiser" || repo.listOptions.Search != "rescue" || repo.listOptions.Sort != domain.CampaignListSortMostDonated || repo.listOptions.Status == nil || *repo.listOptions.Status != domain.CampaignStatusActive || repo.listOptions.Page != 2 || repo.listOptions.PageSize != 25 {
+				t.Errorf("repository input = calls:%d wallet:%q options:%#v", repo.listCalls, repo.listWallet, repo.listOptions)
+			}
+			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
+				t.Errorf("campaigns = %#v", campaigns)
 			}
 		})
 	}

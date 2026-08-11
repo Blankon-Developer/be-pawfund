@@ -14,6 +14,23 @@ const (
 	CampaignStatusCancelled CampaignStatus = "cancelled"
 )
 
+type CampaignListSort string
+
+const (
+	CampaignListSortNewest      CampaignListSort = "newest"
+	CampaignListSortOldest      CampaignListSort = "oldest"
+	CampaignListSortCloseToGoal CampaignListSort = "close-to-goal"
+	CampaignListSortMostDonated CampaignListSort = "most-donated"
+)
+
+type CampaignListOptions struct {
+	Search   string
+	Sort     CampaignListSort
+	Status   *CampaignStatus
+	Page     int64
+	PageSize int64
+}
+
 type CampaignDeploymentStatus string
 
 const (

@@ -17,6 +17,11 @@ var (
 )
 
 type CampaignRepository interface {
+	ListForFundraiser(
+		ctx context.Context,
+		walletAddress string,
+		options domain.CampaignListOptions,
+	) ([]domain.Campaign, error)
 	FindByIDForFundraiser(
 		ctx context.Context,
 		walletAddress string,
