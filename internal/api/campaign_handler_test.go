@@ -16,14 +16,20 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type campaignServiceStub struct {
-	created domain.Campaign
-	err     error
-	calls   int
-	input   service.CreateCampaignInput
+	created       domain.Campaign
+	err           error
+	calls         int
+	input         service.CreateCampaignInput
+	retrieved     domain.Campaign
+	getErr        error
+	getCalls      int
+	getWallet     string
+	getCampaignID uuid.UUID
 }
 
 func (s *campaignServiceStub) Create(
@@ -33,6 +39,17 @@ func (s *campaignServiceStub) Create(
 	s.calls++
 	s.input = input
 	return s.created, s.err
+}
+
+func (s *campaignServiceStub) GetMyCampaignDetail(
+	_ context.Context,
+	walletAddress string,
+	campaignID uuid.UUID,
+) (domain.Campaign, error) {
+	s.getCalls++
+	s.getWallet = walletAddress
+	s.getCampaignID = campaignID
+	return s.retrieved, s.getErr
 }
 
 func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
@@ -204,6 +221,139 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
 			if data.ImageURL == nil || *data.ImageURL != wantImageURL {
 				t.Errorf("image URL = %#v, want %q", data.ImageURL, wantImageURL)
+			}
+		})
+	}
+}
+
+func TestCampaignHandlerHandleGetMyCampaignDetail(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	endAt := createdAt.Add(30 * 24 * time.Hour)
+	contractAddress := "0xCampaign"
+	unexpectedFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name         string
+		campaignID   string
+		principal    *auth.Principal
+		serviceError error
+		wantHTTP     int
+		wantCode     string
+		wantCalls    int
+	}{
+		{
+			name:       "returns the authenticated fundraiser campaign",
+			campaignID: campaignID.String(),
+			principal:  &auth.Principal{WalletAddress: " 0xFundraiser ", Role: domain.UserRoleFundraiser},
+			wantHTTP:   http.StatusOK,
+			wantCode:   "CAMPAIGN_RETRIEVED",
+			wantCalls:  1,
+		},
+		{
+			name:       "rejects an invalid campaign ID",
+			campaignID: "not-a-uuid",
+			principal:  &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			wantHTTP:   http.StatusUnprocessableEntity,
+			wantCode:   "VALIDATION_ERROR",
+		},
+		{
+			name:       "requires an authenticated principal",
+			campaignID: campaignID.String(),
+			wantHTTP:   http.StatusUnauthorized,
+			wantCode:   "INVALID_ACCESS_TOKEN",
+		},
+		{
+			name:       "requires fundraiser access",
+			campaignID: campaignID.String(),
+			principal:  &auth.Principal{WalletAddress: "0xSupporter", Role: domain.UserRoleSupporter},
+			wantHTTP:   http.StatusForbidden,
+			wantCode:   "FUNDRAISER_ACCESS_REQUIRED",
+		},
+		{
+			name:         "hides a campaign owned by another fundraiser",
+			campaignID:   campaignID.String(),
+			principal:    &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			serviceError: service.ErrCampaignNotFound,
+			wantHTTP:     http.StatusNotFound,
+			wantCode:     "CAMPAIGN_NOT_FOUND",
+			wantCalls:    1,
+		},
+		{
+			name:         "hides unexpected service failure",
+			campaignID:   campaignID.String(),
+			principal:    &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			serviceError: unexpectedFailure,
+			wantHTTP:     http.StatusInternalServerError,
+			wantCode:     "INTERNAL_SERVER_ERROR",
+			wantCalls:    1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serviceStub := &campaignServiceStub{
+				retrieved: domain.Campaign{
+					ID:               campaignID,
+					Title:            "Emergency Rescue",
+					ShortDescription: "Help rescued animals",
+					Story:            "A long rescue story.",
+					GoalAmount:       10_000_000_000,
+					RaisedAmount:     100_000_000,
+					DonorCount:       3,
+					EndAt:            endAt,
+					ImageObjectKey:   "campaigns/rescue photo.png",
+					Country:          "Indonesia",
+					ZipCode:          "10110",
+					Status:           domain.CampaignStatusActive,
+					DeploymentStatus: domain.CampaignDeploymentStatusDeployed,
+					ContractAddress:  &contractAddress,
+					CreatedAt:        createdAt,
+				},
+				getErr: test.serviceError,
+			}
+			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
+			if err != nil {
+				t.Fatalf("create public URL builder: %v", err)
+			}
+			handler := NewCampaignHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/campaigns/"+test.campaignID, nil)
+			routeContext := chi.NewRouteContext()
+			routeContext.URLParams.Add("id", test.campaignID)
+			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+			if test.principal != nil {
+				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
+			}
+			response := httptest.NewRecorder()
+
+			handler.HandleGetMyCampaignDetail(response, request)
+
+			var decoded decodedResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode response: %v; body: %s", err, response.Body.String())
+			}
+			if response.Code != test.wantHTTP || decoded.Code != test.wantCode {
+				t.Errorf("status/code = %d/%q, want %d/%q; body: %s", response.Code, decoded.Code, test.wantHTTP, test.wantCode, response.Body.String())
+			}
+			if serviceStub.getCalls != test.wantCalls {
+				t.Errorf("service calls = %d, want %d", serviceStub.getCalls, test.wantCalls)
+			}
+			if test.wantHTTP != http.StatusOK {
+				return
+			}
+			if serviceStub.getWallet != "0xFundraiser" || serviceStub.getCampaignID != campaignID {
+				t.Errorf("service input = %q/%s", serviceStub.getWallet, serviceStub.getCampaignID)
+			}
+			var data campaignResponse
+			if err := json.Unmarshal(decoded.Data, &data); err != nil {
+				t.Fatalf("decode success data: %v", err)
+			}
+			if data.Title != "Emergency Rescue" || data.RaisedAmount != 100_000_000 || data.Status != domain.CampaignStatusActive || data.DeploymentStatus != domain.CampaignDeploymentStatusDeployed {
+				t.Errorf("response data = %#v", data)
+			}
+			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
+			if data.ImageURL == nil || *data.ImageURL != wantImageURL || data.ContractAddress == nil || *data.ContractAddress != contractAddress {
+				t.Errorf("response URLs = %#v", data)
 			}
 		})
 	}

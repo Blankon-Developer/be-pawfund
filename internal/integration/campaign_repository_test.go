@@ -147,6 +147,66 @@ func TestPostgresCampaignRepositoryCreatePending(t *testing.T) {
 	})
 }
 
+func TestPostgresCampaignRepositoryFindByIDForFundraiser(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	const (
+		ownerWallet = "0xFundraiserChecksum"
+		otherWallet = "0xOtherFundraiser"
+	)
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("owner@example.com", ownerWallet, nil))
+	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("other@example.com", otherWallet, nil))
+
+	requested := newPendingCampaign(time.Now().UTC().Add(30*time.Hour), "find-owned-campaign")
+	created, err := campaignRepo.CreatePending(t.Context(), ownerWallet, requested, time.Now().UTC().Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("CreatePending() unexpected error: %v", err)
+	}
+	const contractAddress = "0xCampaign"
+	if _, err := testDatabase.ExecContext(
+		t.Context(),
+		`UPDATE campaigns SET raised_amount = $1, donor_count = $2, contract_address = $3 WHERE id = $4`,
+		100_000_000,
+		3,
+		contractAddress,
+		created.ID,
+	); err != nil {
+		t.Fatalf("update campaign fixture: %v", err)
+	}
+
+	found, err := campaignRepo.FindByIDForFundraiser(t.Context(), strings.ToLower(ownerWallet), created.ID)
+	if err != nil {
+		t.Fatalf("FindByIDForFundraiser() unexpected error: %v", err)
+	}
+	if found.ID != created.ID || found.FundraiserID != created.FundraiserID || found.Title != requested.Title {
+		t.Errorf("found identity = %#v", found)
+	}
+	if found.RaisedAmount != 100_000_000 || found.DonorCount != 3 || found.ContractAddress == nil || *found.ContractAddress != contractAddress {
+		t.Errorf("found campaign state = %#v", found)
+	}
+
+	_, err = campaignRepo.FindByIDForFundraiser(t.Context(), otherWallet, created.ID)
+	if !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("other fundraiser error = %v, want ErrCampaignNotFound", err)
+	}
+
+	_, err = campaignRepo.FindByIDForFundraiser(t.Context(), ownerWallet, uuid.New())
+	if !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("unknown campaign error = %v, want ErrCampaignNotFound", err)
+	}
+
+	if _, err := testDatabase.ExecContext(t.Context(), `UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, created.FundraiserID); err != nil {
+		t.Fatalf("soft-delete fundraiser fixture: %v", err)
+	}
+	_, err = campaignRepo.FindByIDForFundraiser(t.Context(), ownerWallet, created.ID)
+	if !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("deleted fundraiser error = %v, want ErrCampaignNotFound", err)
+	}
+}
+
 func newPendingCampaign(endAt time.Time, idempotencyKey string) domain.Campaign {
 	return domain.Campaign{
 		ID:               uuid.New(),

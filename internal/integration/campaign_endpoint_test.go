@@ -131,6 +131,86 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetMyCampaignDetailEndpoint(t *testing.T) {
+	cleanDatabase(t)
+	t.Cleanup(func() { cleanDatabase(t) })
+
+	const (
+		ownerWallet = "0xFundraiserChecksum"
+		otherWallet = "0xOtherFundraiser"
+	)
+	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("owner@example.com", ownerWallet, nil))
+	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("other@example.com", otherWallet, nil))
+	campaign, err := campaignRepo.CreatePending(
+		t.Context(),
+		ownerWallet,
+		newPendingCampaign(time.Now().UTC().Add(30*time.Hour), "get-owned-campaign"),
+		time.Now().UTC().Add(5*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("create campaign fixture: %v", err)
+	}
+
+	router, jwtManager := newCampaignIntegrationRouter(t)
+	ownerToken, err := jwtManager.Generate(ownerWallet, domain.UserRoleFundraiser, time.Hour)
+	if err != nil {
+		t.Fatalf("generate owner token: %v", err)
+	}
+	response := requestMyCampaignDetail(t, router, ownerToken, campaign.ID.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("get campaign status = %d; body: %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Code string `json:"code"`
+		Data struct {
+			Title            string                          `json:"title"`
+			GoalAmount       int64                           `json:"goalAmount"`
+			Status           domain.CampaignStatus           `json:"status"`
+			DeploymentStatus domain.CampaignDeploymentStatus `json:"deploymentStatus"`
+			ContractAddress  *string                         `json:"contractAddress"`
+			ImageURL         *string                         `json:"imageUrl"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode campaign detail response: %v", err)
+	}
+	if envelope.Code != "CAMPAIGN_RETRIEVED" || envelope.Data.Title != campaign.Title || envelope.Data.GoalAmount != campaign.GoalAmount {
+		t.Errorf("campaign detail = %#v", envelope)
+	}
+	if envelope.Data.Status != domain.CampaignStatusActive || envelope.Data.DeploymentStatus != domain.CampaignDeploymentStatusPending || envelope.Data.ContractAddress != nil {
+		t.Errorf("campaign detail state = %#v", envelope.Data)
+	}
+	wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue.png"
+	if envelope.Data.ImageURL == nil || *envelope.Data.ImageURL != wantImageURL {
+		t.Errorf("campaign image URL = %#v, want %q", envelope.Data.ImageURL, wantImageURL)
+	}
+
+	otherToken, err := jwtManager.Generate(otherWallet, domain.UserRoleFundraiser, time.Hour)
+	if err != nil {
+		t.Fatalf("generate other token: %v", err)
+	}
+	result := decodeAuthEndpointResult(t, requestMyCampaignDetail(t, router, otherToken, campaign.ID.String()))
+	if result.HTTPStatus != http.StatusNotFound || result.Code != "CAMPAIGN_NOT_FOUND" {
+		t.Errorf("other fundraiser detail = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+
+	supporterToken, err := jwtManager.Generate("0xSupporter", domain.UserRoleSupporter, time.Hour)
+	if err != nil {
+		t.Fatalf("generate supporter token: %v", err)
+	}
+	result = decodeAuthEndpointResult(t, requestMyCampaignDetail(t, router, supporterToken, campaign.ID.String()))
+	if result.HTTPStatus != http.StatusForbidden || result.Code != "FUNDRAISER_ACCESS_REQUIRED" {
+		t.Errorf("supporter detail = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+
+	result = decodeAuthEndpointResult(t, requestMyCampaignDetail(t, router, ownerToken, "not-a-uuid"))
+	if result.HTTPStatus != http.StatusUnprocessableEntity || result.Code != "VALIDATION_ERROR" {
+		t.Errorf("invalid campaign ID = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+}
+
 func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -163,6 +243,20 @@ func requestCreateCampaign(
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Idempotency-Key", idempotencyKey)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func requestMyCampaignDetail(
+	t *testing.T,
+	router http.Handler,
+	token string,
+	campaignID string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/campaigns/"+campaignID, nil)
+	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response

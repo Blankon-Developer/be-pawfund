@@ -19,6 +19,25 @@ type campaignRepositoryStub struct {
 	wallet       string
 	campaign     domain.Campaign
 	minimumEndAt time.Time
+	retrieved    domain.Campaign
+	findErr      error
+	findCalls    int
+	findWallet   string
+	findID       uuid.UUID
+}
+
+func (s *campaignRepositoryStub) FindByIDForFundraiser(
+	_ context.Context,
+	walletAddress string,
+	campaignID uuid.UUID,
+) (domain.Campaign, error) {
+	s.findCalls++
+	s.findWallet = walletAddress
+	s.findID = campaignID
+	if s.findErr != nil {
+		return domain.Campaign{}, s.findErr
+	}
+	return s.retrieved, nil
 }
 
 func (s *campaignRepositoryStub) CreatePending(
@@ -116,6 +135,50 @@ func TestCampaignServiceCreate(t *testing.T) {
 			}
 			if test.wantError == nil && created.ID != fixedID {
 				t.Errorf("created campaign = %#v", created)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceGetMyCampaignDetail(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	repositoryFailure := errors.New("database unavailable")
+
+	tests := []struct {
+		name            string
+		repositoryError error
+		wantError       error
+	}{
+		{name: "returns the owned campaign"},
+		{name: "maps campaign not found", repositoryError: repository.ErrCampaignNotFound, wantError: ErrCampaignNotFound},
+		{name: "wraps repository failure", repositoryError: repositoryFailure, wantError: repositoryFailure},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{
+				retrieved: domain.Campaign{ID: campaignID, Title: "Emergency Rescue"},
+				findErr:   test.repositoryError,
+			}
+			campaignService := NewCampaignService(repo, nil)
+
+			campaign, err := campaignService.GetMyCampaignDetail(t.Context(), " 0xFundraiser ", campaignID)
+
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("GetMyCampaignDetail() error = %v, want %v", err, test.wantError)
+				}
+				if test.repositoryError == repositoryFailure && !strings.Contains(err.Error(), "get fundraiser campaign detail") {
+					t.Errorf("GetMyCampaignDetail() error lacks operation context: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("GetMyCampaignDetail() unexpected error: %v", err)
+			}
+			if repo.findCalls != 1 || repo.findWallet != "0xFundraiser" || repo.findID != campaignID {
+				t.Errorf("repository input = calls:%d wallet:%q campaign:%s", repo.findCalls, repo.findWallet, repo.findID)
+			}
+			if test.wantError == nil && campaign.ID != campaignID {
+				t.Errorf("campaign = %#v", campaign)
 			}
 		})
 	}

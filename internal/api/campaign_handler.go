@@ -13,6 +13,8 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 const (
@@ -22,6 +24,7 @@ const (
 
 type CampaignService interface {
 	Create(ctx context.Context, input service.CreateCampaignInput) (domain.Campaign, error)
+	GetMyCampaignDetail(ctx context.Context, walletAddress string, campaignID uuid.UUID) (domain.Campaign, error)
 }
 
 type CampaignHandler struct {
@@ -163,4 +166,77 @@ func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Re
 		CreatedAt:        created.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	h.Success(w, http.StatusCreated, "CAMPAIGN_CREATED", "Campaign created successfully.", response)
+}
+
+func (h *CampaignHandler) HandleGetMyCampaignDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	walletAddress := strings.TrimSpace(principal.WalletAddress)
+	if !ok || walletAddress == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		h.Error(
+			w,
+			http.StatusUnauthorized,
+			"INVALID_ACCESS_TOKEN",
+			"The access token is invalid or expired.",
+			nil,
+		)
+		return
+	}
+	if principal.Role != domain.UserRoleFundraiser {
+		h.Error(
+			w,
+			http.StatusForbidden,
+			"FUNDRAISER_ACCESS_REQUIRED",
+			"A registered fundraiser account is required.",
+			nil,
+		)
+		return
+	}
+
+	campaignID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		h.ValidationError(w, httpx.FieldErrors{
+			"id": {"id must be a valid UUID!"},
+		})
+		return
+	}
+
+	campaign, err := h.service.GetMyCampaignDetail(r.Context(), walletAddress, campaignID)
+	if err != nil {
+		if errors.Is(err, service.ErrCampaignNotFound) {
+			h.Error(
+				w,
+				http.StatusNotFound,
+				"CAMPAIGN_NOT_FOUND",
+				"No campaign was found for the authenticated fundraiser.",
+				nil,
+			)
+			return
+		}
+
+		h.Logger.Error("get fundraiser campaign detail", "error", err)
+		h.InternalError(w)
+		return
+	}
+
+	imageObjectKey := campaign.ImageObjectKey
+	response := campaignResponse{
+		Title:            campaign.Title,
+		ShortDescription: campaign.ShortDescription,
+		Story:            campaign.Story,
+		GoalAmount:       campaign.GoalAmount,
+		RaisedAmount:     campaign.RaisedAmount,
+		DonorCount:       campaign.DonorCount,
+		EndAt:            campaign.EndAt.UTC().Format(time.RFC3339),
+		ImageURL:         h.urlBuilder.Build(&imageObjectKey),
+		Country:          campaign.Country,
+		ZipCode:          campaign.ZipCode,
+		Status:           campaign.Status,
+		DeploymentStatus: campaign.DeploymentStatus,
+		ContractAddress:  campaign.ContractAddress,
+		CreatedAt:        campaign.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	h.Success(w, http.StatusOK, "CAMPAIGN_RETRIEVED", "Campaign retrieved successfully.", response)
 }

@@ -87,3 +87,20 @@ type createCampaignResponse struct {
 	ContractAddress  *string                         `json:"contractAddress"`
 	CreatedAt        string                          `json:"createdAt"`
 }
+
+type campaignResponse struct {
+	Title            string                          `json:"title"`
+	ShortDescription string                          `json:"shortDescription"`
+	Story            string                          `json:"story"`
+	GoalAmount       int64                           `json:"goalAmount"`
+	RaisedAmount     int64                           `json:"raisedAmount"`
+	DonorCount       int64                           `json:"donorCount"`
+	EndAt            string                          `json:"endAt"`
+	ImageURL         *string                         `json:"imageUrl"`
+	Country          string                          `json:"country"`
+	ZipCode          string                          `json:"zipCode"`
+	Status           domain.CampaignStatus           `json:"status"`
+	DeploymentStatus domain.CampaignDeploymentStatus `json:"deploymentStatus"`
+	ContractAddress  *string                         `json:"contractAddress"`
+	CreatedAt        string                          `json:"createdAt"`
+}

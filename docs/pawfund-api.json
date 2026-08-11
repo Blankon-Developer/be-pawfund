@@ -774,73 +774,86 @@
         "operationId": "get_campaigns"
       }
     },
-    "/fundraiser/campaigns/{address}": {
+    "/fundraiser/campaigns/{id}": {
       "get": {
         "tags": ["Fundraiser Campaigns"],
         "summary": "Get My Campaign Detail",
+        "description": "Get a campaign owned by the authenticated fundraiser. The campaign ID is returned when a campaign is created, so pending campaigns without a contract address can also be retrieved.",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Campaign retrieved successfully.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "message": { "type": "string" },
+                    "status": { "type": "string", "enum": ["success"] },
+                    "code": { "type": "string", "enum": ["CAMPAIGN_RETRIEVED"] },
+                    "message": { "type": "string", "default": "Campaign retrieved successfully." },
                     "data": {
                       "type": "object",
                       "properties": {
                         "title": { "type": "string" },
                         "shortDescription": { "type": "string" },
                         "story": { "type": "string" },
-                        "goalAmount": { "type": "number" },
-                        "raisedAmount": { "type": "number" },
-                        "donorCount": { "type": "number" },
-                        "contractAddress": { "type": "string" },
-                        "endAt": { "type": "string" },
-                        "createdAt": { "type": "string" },
-                        "imageUrl": { "type": "string" },
+                        "goalAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+                        "raisedAmount": { "type": "integer", "format": "int64", "description": "Atomic USDC units." },
+                        "donorCount": { "type": "integer", "format": "int64" },
+                        "contractAddress": { "type": "string", "nullable": true },
+                        "endAt": { "type": "string", "format": "date-time" },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "imageUrl": { "type": "string", "format": "uri", "nullable": true },
                         "country": { "type": "string" },
-                        "zipCode": { "type": "string" }
+                        "zipCode": { "type": "string" },
+                        "status": { "type": "string", "enum": ["active", "completed", "cancelled"] },
+                        "deploymentStatus": { "type": "string", "enum": ["pending", "submitted", "deployed", "failed"] }
                       },
                       "required": [
-                        "zipCode",
-                        "country",
-                        "imageUrl",
-                        "createdAt",
-                        "endAt",
-                        "contractAddress",
-                        "donorCount",
-                        "raisedAmount",
-                        "goalAmount",
-                        "story",
+                        "title",
                         "shortDescription",
-                        "title"
+                        "story",
+                        "goalAmount",
+                        "raisedAmount",
+                        "donorCount",
+                        "endAt",
+                        "imageUrl",
+                        "country",
+                        "zipCode",
+                        "createdAt",
+                        "contractAddress",
+                        "status",
+                        "deploymentStatus"
                       ]
-                    }
+                    },
+                    "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["code", "message", "data"]
+                  "required": ["status", "code", "message", "data", "errors"]
                 }
               }
             }
-          }
+          },
+          "401": { "description": "Missing, invalid, or expired access token." },
+          "403": { "description": "The authenticated wallet is not a registered fundraiser." },
+          "404": { "description": "No campaign exists for the supplied ID that is owned by the authenticated fundraiser." },
+          "422": { "description": "The campaign ID is not a valid UUID." },
+          "500": { "description": "An unexpected server error occurred while retrieving the campaign." }
         },
         "parameters": [
           {
             "in": "path",
-            "name": "address",
-            "schema": { "type": "string" },
+            "name": "id",
+            "description": "Campaign UUID returned by the create campaign endpoint.",
+            "schema": { "type": "string", "format": "uuid" },
             "required": true
           },
           {
             "in": "header",
             "name": "Authorization",
-            "schema": { "type": "string", "default": "Bearer {token}" },
+            "schema": { "type": "string", "default": "Bearer <jwt>" },
             "required": true
           }
         ],
-        "operationId": "get_campaigns-1-1"
+        "operationId": "get_fundraiser-campaigns-id"
       }
     },
     "/campaigns/{address}": {

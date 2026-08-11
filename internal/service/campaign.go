@@ -17,6 +17,7 @@ const CampaignDeploymentLeadTime = 5 * time.Minute
 var (
 	ErrCampaignIdempotencyConflict = errors.New("campaign idempotency key conflict")
 	ErrCampaignEndAtTooSoon        = errors.New("campaign end time is too soon")
+	ErrCampaignNotFound            = errors.New("campaign not found")
 )
 
 type CreateCampaignInput struct {
@@ -43,6 +44,21 @@ func NewCampaignService(repo repository.CampaignRepository, generateID IDGenerat
 		generateID = uuid.NewV7
 	}
 	return &CampaignService{repository: repo, generateID: generateID, now: time.Now}
+}
+
+func (s *CampaignService) GetMyCampaignDetail(
+	ctx context.Context,
+	walletAddress string,
+	campaignID uuid.UUID,
+) (domain.Campaign, error) {
+	campaign, err := s.repository.FindByIDForFundraiser(ctx, strings.TrimSpace(walletAddress), campaignID)
+	if err != nil {
+		if errors.Is(err, repository.ErrCampaignNotFound) {
+			return domain.Campaign{}, ErrCampaignNotFound
+		}
+		return domain.Campaign{}, fmt.Errorf("service: get fundraiser campaign detail: %w", err)
+	}
+	return campaign, nil
 }
 
 func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput) (domain.Campaign, error) {

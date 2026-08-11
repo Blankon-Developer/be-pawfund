@@ -20,6 +20,50 @@ func NewPostgresCampaignRepository(db *sql.DB) *PostgresCampaignRepository {
 	return &PostgresCampaignRepository{db: db}
 }
 
+func (r *PostgresCampaignRepository) FindByIDForFundraiser(
+	ctx context.Context,
+	walletAddress string,
+	campaignID uuid.UUID,
+) (domain.Campaign, error) {
+	const query = `
+		SELECT
+			c.id,
+			c.fundraiser_id,
+			c.event_id,
+			c.title,
+			c.short_description,
+			c.story,
+			c.goal_amount,
+			c.raised_amount,
+			c.donor_count,
+			c.contract_address,
+			c.created_at,
+			c.end_at,
+			c.image_object_key,
+			c.country,
+			c.zip_code,
+			c.status,
+			c.deployment_status,
+			c.idempotency_key
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE c.id = $1
+			AND u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($2)
+	`
+
+	campaign, err := scanCampaign(r.db.QueryRowContext(ctx, query, campaignID, strings.TrimSpace(walletAddress)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Campaign{}, ErrCampaignNotFound
+	}
+	if err != nil {
+		return domain.Campaign{}, fmt.Errorf("repository: find campaign by ID for fundraiser: %w", err)
+	}
+	return campaign, nil
+}
+
 func (r *PostgresCampaignRepository) CreatePending(
 	ctx context.Context,
 	walletAddress string,
