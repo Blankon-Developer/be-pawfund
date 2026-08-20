@@ -17,6 +17,7 @@ func TestLoad(t *testing.T) {
 		"STORAGE_BUCKET":          "bucket",
 		"CACHE_URL":               "redis://localhost:6379/0",
 		"CACHE_KEY_PREFIX":        "pawfund-test",
+		"QUEUE_URL":               "amqp://guest:guest@localhost:5672/",
 		"SIWE_DOMAIN":             "app.example.com",
 		"SIWE_URI":                "https://app.example.com/login",
 		"SIWE_CHAIN_ID":           "84532",
@@ -132,6 +133,13 @@ func TestLoad(t *testing.T) {
 				"CACHE_KEY_PREFIX": "",
 			}),
 			wantError: "CACHE_KEY_PREFIX is required",
+		},
+		{
+			name: "requires queue URL",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"QUEUE_URL": "",
+			}),
+			wantError: "QUEUE_URL is required",
 		},
 		{
 			name: "requires SIWE domain",

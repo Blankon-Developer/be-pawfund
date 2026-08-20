@@ -1,5 +1,6 @@
 TEST_DATABASE_URL ?= postgres://pawfund_test:pawfund_test@localhost:5433/pawfund_test?sslmode=disable
 TEST_CACHE_URL ?= redis://localhost:6380/0
+TEST_QUEUE_URL ?= amqp://pawfund_test:pawfund_test@localhost:5673/
 TEST_STORAGE_ENDPOINT ?= http://localhost:9002
 TEST_STORAGE_ACCESS_KEY ?= minioadmin
 TEST_STORAGE_SECRET_KEY ?= minioadmin
@@ -12,10 +13,10 @@ test:
 	go test ./...
 
 test-deps-up:
-	docker compose --profile test up -d --wait postgres-test redis-test minio-test
+	docker compose --profile test up -d --wait postgres-test redis-test minio-test rabbitmq-test
 
 test-deps-down:
-	docker compose --profile test rm --stop --force postgres-test redis-test minio-test
+	docker compose --profile test rm --stop --force postgres-test redis-test minio-test rabbitmq-test
 
 test-db-up: test-deps-up
 
@@ -24,6 +25,7 @@ test-db-down: test-deps-down
 test-integration: test-deps-up
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
 	TEST_CACHE_URL="$(TEST_CACHE_URL)" \
+	TEST_QUEUE_URL="$(TEST_QUEUE_URL)" \
 	TEST_STORAGE_ENDPOINT="$(TEST_STORAGE_ENDPOINT)" \
 	TEST_STORAGE_ACCESS_KEY="$(TEST_STORAGE_ACCESS_KEY)" \
 	TEST_STORAGE_SECRET_KEY="$(TEST_STORAGE_SECRET_KEY)" \

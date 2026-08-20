@@ -30,6 +30,7 @@ type Config struct {
 	StoragePresignTTL    time.Duration
 	CacheURL             string
 	CacheKeyPrefix       string
+	QueueURL             string
 	SIWEDomain           string
 	SIWEURI              string
 	SIWEChainID          int
@@ -54,6 +55,7 @@ func load(getenv func(string) string) (Config, error) {
 		StorageRegion:        strings.TrimSpace(getenv("STORAGE_REGION")),
 		CacheURL:             strings.TrimSpace(getenv("CACHE_URL")),
 		CacheKeyPrefix:       strings.TrimSpace(getenv("CACHE_KEY_PREFIX")),
+		QueueURL:             strings.TrimSpace(getenv("QUEUE_URL")),
 		SIWEDomain:           strings.TrimSpace(getenv("SIWE_DOMAIN")),
 		SIWEURI:              strings.TrimSpace(getenv("SIWE_URI")),
 	}
@@ -93,6 +95,9 @@ func load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.CacheKeyPrefix == "" {
 		return Config{}, fmt.Errorf("config: CACHE_KEY_PREFIX is required")
+	}
+	if cfg.QueueURL == "" {
+		return Config{}, fmt.Errorf("config: QUEUE_URL is required")
 	}
 	if cfg.SIWEDomain == "" {
 		return Config{}, fmt.Errorf("config: SIWE_DOMAIN is required")

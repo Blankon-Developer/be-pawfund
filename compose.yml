@@ -140,6 +140,8 @@ services:
   rabbitmq-test:
     image: rabbitmq:4.3.4-management-alpine
     profiles: ["test"]
+    tmpfs:
+      - /var/lib/rabbitmq
     ports:
       - "127.0.0.1:${RABBITMQ_TEST_AMQP_PORT:-5673}:5672"
       - "127.0.0.1:${RABBITMQ_TEST_MGMT_PORT:-15673}:15672"

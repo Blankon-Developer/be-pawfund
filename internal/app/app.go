@@ -13,6 +13,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/cache"
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/queue"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
@@ -22,6 +23,7 @@ import (
 type Application struct {
 	DB                *sql.DB
 	Cache             *cache.CacheClient
+	Queue             *queue.QueueClient
 	AuthHandler       *api.AuthHandler
 	UploadHandler     *api.UploadHandler
 	SupporterHandler  *api.SupporterHandler
@@ -37,8 +39,14 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	}
 
 	var cacheClient *cache.CacheClient
+	var queueClient *queue.QueueClient
 	fail := func(startupErr error) (*Application, error) {
 		var cleanupErrors []error
+		if queueClient != nil {
+			if err := queueClient.Close(); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+		}
 		if cacheClient != nil {
 			if err := cacheClient.Close(); err != nil {
 				cleanupErrors = append(cleanupErrors, err)
@@ -86,6 +94,11 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return fail(fmt.Errorf("app: initialize cache: %w", err))
 	}
 
+	queueClient, err = queue.Open(ctx, queue.Config{URL: cfg.QueueURL, Logger: logger})
+	if err != nil {
+		return fail(fmt.Errorf("app: initialize queue: %w", err))
+	}
+
 	supporterRepository := repository.NewPostgresSupporterRepository(db)
 	fundraiserRepository := repository.NewPostgresFundraiserRepository(db)
 	campaignRepository := repository.NewPostgresCampaignRepository(db)
@@ -117,6 +130,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	return &Application{
 		DB:                db,
 		Cache:             cacheClient,
+		Queue:             queueClient,
 		AuthHandler:       authHandler,
 		UploadHandler:     uploadHandler,
 		SupporterHandler:  supporterHandler,
@@ -128,6 +142,11 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 func (a *Application) Close() error {
 	var closeErrors []error
+	if a.Queue != nil {
+		if err := a.Queue.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("app: close queue: %w", err))
+		}
+	}
 	if a.Cache != nil {
 		if err := a.Cache.Close(); err != nil {
 			closeErrors = append(closeErrors, fmt.Errorf("app: close cache: %w", err))
