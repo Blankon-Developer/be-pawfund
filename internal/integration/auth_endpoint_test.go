@@ -337,6 +337,7 @@ func newAuthIntegrationRouter(t *testing.T, messageTTL time.Duration) (http.Hand
 		StoragePresignTTL:    15 * time.Minute,
 		CacheURL:             testCacheURL,
 		CacheKeyPrefix:       integrationCacheKeyPrefix,
+		QueueURL:             testQueueURL,
 		SIWEDomain:           "app.example.com",
 		SIWEURI:              "https://app.example.com/login",
 		SIWEChainID:          84532,

@@ -28,6 +28,7 @@ var (
 	testDatabaseURL      string
 	testCacheURL         string
 	testQueueURL         string
+	testQueueMgmtURL     string
 	testStorageEndpoint  string
 	testStorageAccessKey string
 	testStorageSecretKey string
@@ -50,6 +51,11 @@ func TestMain(m *testing.M) {
 	testQueueURL = os.Getenv("TEST_QUEUE_URL")
 	if testQueueURL == "" {
 		fmt.Fprintln(os.Stderr, "TEST_QUEUE_URL is required for integration tests")
+		os.Exit(1)
+	}
+	testQueueMgmtURL = os.Getenv("TEST_QUEUE_MGMT_URL")
+	if testQueueMgmtURL == "" {
+		fmt.Fprintln(os.Stderr, "TEST_QUEUE_MGMT_URL is required for integration tests")
 		os.Exit(1)
 	}
 	testStorageEndpoint = os.Getenv("TEST_STORAGE_ENDPOINT")
