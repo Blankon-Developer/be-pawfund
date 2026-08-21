@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "info": { "version": "1.0.0", "title": "Pawfund API" },
-  "servers": [{ "url": "https://api.pawfund.com/v1" }],
+  "servers": [{ "url": "https://be-pawfund.onrender.com/v1" }],
   "tags": [
     {
       "name": "Authentication",
