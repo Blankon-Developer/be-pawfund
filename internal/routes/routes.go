@@ -14,6 +14,7 @@ import (
 func Setup(application *app.Application, logger *slog.Logger) http.Handler {
 	router := chi.NewRouter()
 	router.Use(chimiddleware.RequestID)
+	router.Use(appmiddleware.CORS(application.CORSAllowedOrigins))
 	router.Use(appmiddleware.Recover(logger))
 
 	router.Get("/health", func(w http.ResponseWriter, _ *http.Request) {

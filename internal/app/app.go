@@ -21,15 +21,16 @@ import (
 )
 
 type Application struct {
-	DB                *sql.DB
-	Cache             *cache.CacheClient
-	Queue             *queue.QueueClient
-	AuthHandler       *api.AuthHandler
-	UploadHandler     *api.UploadHandler
-	SupporterHandler  *api.SupporterHandler
-	FundraiserHandler *api.FundraiserHandler
-	CampaignHandler   *api.CampaignHandler
-	Authenticate      func(http.Handler) http.Handler
+	DB                 *sql.DB
+	Cache              *cache.CacheClient
+	Queue              *queue.QueueClient
+	AuthHandler        *api.AuthHandler
+	UploadHandler      *api.UploadHandler
+	SupporterHandler   *api.SupporterHandler
+	FundraiserHandler  *api.FundraiserHandler
+	CampaignHandler    *api.CampaignHandler
+	Authenticate       func(http.Handler) http.Handler
+	CORSAllowedOrigins []string
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Application, error) {
@@ -128,15 +129,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	uploadHandler := api.NewUploadHandler(uploadService, logger)
 
 	return &Application{
-		DB:                db,
-		Cache:             cacheClient,
-		Queue:             queueClient,
-		AuthHandler:       authHandler,
-		UploadHandler:     uploadHandler,
-		SupporterHandler:  supporterHandler,
-		FundraiserHandler: fundraiserHandler,
-		CampaignHandler:   campaignHandler,
-		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
+		DB:                 db,
+		Cache:              cacheClient,
+		Queue:              queueClient,
+		AuthHandler:        authHandler,
+		UploadHandler:      uploadHandler,
+		SupporterHandler:   supporterHandler,
+		FundraiserHandler:  fundraiserHandler,
+		CampaignHandler:    campaignHandler,
+		Authenticate:       appmiddleware.Authenticate(jwtManager, logger),
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 	}, nil
 }
 

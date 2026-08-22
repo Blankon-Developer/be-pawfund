@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -190,6 +191,27 @@ func TestLoad(t *testing.T) {
 			}),
 			wantError: "STORAGE_PRESIGN_TTL must be a positive duration",
 		},
+		{
+			name: "rejects wildcard CORS origin",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"CORS_ALLOWED_ORIGINS": "*",
+			}),
+			wantError: "CORS_ALLOWED_ORIGINS must not include *",
+		},
+		{
+			name: "rejects non-absolute CORS origin",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"CORS_ALLOWED_ORIGINS": "localhost:3000",
+			}),
+			wantError: "CORS_ALLOWED_ORIGINS must contain absolute HTTP(S) origins",
+		},
+		{
+			name: "rejects CORS origin with a path",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"CORS_ALLOWED_ORIGINS": "http://localhost:3000/app",
+			}),
+			wantError: "CORS_ALLOWED_ORIGINS must contain HTTP(S) origins without a path",
+		},
 	}
 
 	for _, test := range tests {
@@ -219,6 +241,81 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.StorageRegion != test.wantRegion {
 				t.Errorf("StorageRegion = %q, want %q", cfg.StorageRegion, test.wantRegion)
+			}
+		})
+	}
+}
+
+func TestLoadCORSAllowedOrigins(t *testing.T) {
+	validEnvironment := map[string]string{
+		"DATABASE_URL":            "postgres://test",
+		"JWT_SECRET":              strings.Repeat("s", 32),
+		"STORAGE_PUBLIC_BASE_URL": "https://storage.example.com/bucket",
+		"STORAGE_ENDPOINT":        "https://storage.example.com",
+		"STORAGE_ACCESS_KEY":      "access-key",
+		"STORAGE_SECRET_KEY":      "secret-key",
+		"STORAGE_BUCKET":          "bucket",
+		"CACHE_URL":               "redis://localhost:6379/0",
+		"CACHE_KEY_PREFIX":        "pawfund-test",
+		"QUEUE_URL":               "amqp://guest:guest@localhost:5672/",
+		"SIWE_DOMAIN":             "app.example.com",
+		"SIWE_URI":                "https://app.example.com/login",
+		"SIWE_CHAIN_ID":           "84532",
+	}
+
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr string
+	}{
+		{
+			name: "defaults to no allowed origins",
+		},
+		{
+			name: "parses a single origin",
+			raw:  "http://localhost:3000",
+			want: []string{"http://localhost:3000"},
+		},
+		{
+			name: "parses comma-separated origins and trims whitespace",
+			raw:  "http://localhost:3000, https://app.example.com",
+			want: []string{"http://localhost:3000", "https://app.example.com"},
+		},
+		{
+			name: "normalizes a trailing slash",
+			raw:  "http://localhost:3000/",
+			want: []string{"http://localhost:3000"},
+		},
+		{
+			name: "deduplicates origins",
+			raw:  "http://localhost:3000, http://localhost:3000/",
+			want: []string{"http://localhost:3000"},
+		},
+		{
+			name:    "rejects credentials in an origin",
+			raw:     "https://user:pass@app.example.com",
+			wantErr: "without credentials, query, or fragment",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			environment := mergeEnvironment(validEnvironment, map[string]string{
+				"CORS_ALLOWED_ORIGINS": test.raw,
+			})
+			cfg, err := load(func(key string) string { return environment[key] })
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("load() error = %v, want error containing %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("load() unexpected error: %v", err)
+			}
+			if !slices.Equal(cfg.CORSAllowedOrigins, test.want) {
+				t.Errorf("CORSAllowedOrigins = %#v, want %#v", cfg.CORSAllowedOrigins, test.want)
 			}
 		})
 	}

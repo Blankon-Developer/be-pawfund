@@ -28,6 +28,7 @@ SIWE_URI=http://localhost:3000/login
 SIWE_CHAIN_ID=84532
 SIWE_MESSAGE_TTL=5m
 JWT_TTL=24h
+CORS_ALLOWED_ORIGINS=http://localhost:3000
 ```
 
 Start the development dependencies, apply migrations, and run the API:
@@ -42,9 +43,12 @@ go run ./cmd/api
 ```
 
 `STORAGE_REGION` defaults to `us-east-1`, and `STORAGE_PRESIGN_TTL` defaults to
-`15m`. The application does not create the bucket. Bucket creation, public-read
-policy, lifecycle rules, and CORS for the frontend origin and `PUT` method are
-managed separately.
+`15m`. `CORS_ALLOWED_ORIGINS` is a comma-separated list of frontend origins
+allowed to call the API from a browser, for example
+`http://localhost:3000,https://app.example.com`. Leave it empty to deny
+cross-origin browser requests. The application does not create the bucket.
+Bucket creation, public-read policy, lifecycle rules, and CORS for the frontend
+origin and `PUT` method are managed separately.
 
 ## Tests
 

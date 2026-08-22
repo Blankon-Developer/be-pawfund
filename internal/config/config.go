@@ -36,6 +36,7 @@ type Config struct {
 	SIWEChainID          int
 	SIWEMessageTTL       time.Duration
 	JWTTTL               time.Duration
+	CORSAllowedOrigins   []string
 }
 
 func Load() (Config, error) {
@@ -140,8 +141,53 @@ func load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.CORSAllowedOrigins, err = parseCORSOrigins(getenv("CORS_ALLOWED_ORIGINS"))
+	if err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
+}
+
+func parseCORSOrigins(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		origin, err := normalizeHTTPOrigin(part)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[origin]; exists {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	return origins, nil
+}
+
+func normalizeHTTPOrigin(raw string) (string, error) {
+	if raw == "*" {
+		return "", fmt.Errorf("config: CORS_ALLOWED_ORIGINS must not include *")
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("config: CORS_ALLOWED_ORIGINS must contain absolute HTTP(S) origins")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("config: CORS_ALLOWED_ORIGINS must contain HTTP(S) origins without credentials, query, or fragment")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", fmt.Errorf("config: CORS_ALLOWED_ORIGINS must contain HTTP(S) origins without a path")
+	}
+
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func validateStorageEndpoint(rawEndpoint string) error {
