@@ -14,6 +14,7 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/go-chi/chi/v5"
@@ -26,11 +27,13 @@ type campaignServiceStub struct {
 	calls             int
 	input             service.CreateCampaignInput
 	listed            []domain.Campaign
+	listTotal         int64
 	listErr           error
 	listCalls         int
 	listWallet        string
 	listOptions       domain.CampaignListOptions
 	publicListed      []domain.PublicCampaignListItem
+	publicListTotal   int64
 	publicListErr     error
 	publicListCalls   int
 	publicListOptions domain.CampaignListOptions
@@ -39,6 +42,7 @@ type campaignServiceStub struct {
 	publicGetCalls    int
 	publicAddress     string
 	publicDonors      []domain.PublicCampaignDonor
+	publicDonorsTotal int64
 	publicDonorsErr   error
 	publicDonorCalls  int
 	publicDonorOpts   domain.CampaignDonorListOptions
@@ -52,13 +56,13 @@ type campaignServiceStub struct {
 func (s *campaignServiceStub) ListPublicCampaigns(
 	_ context.Context,
 	options domain.CampaignListOptions,
-) ([]domain.PublicCampaignListItem, error) {
+) ([]domain.PublicCampaignListItem, int64, error) {
 	s.publicListCalls++
 	s.publicListOptions = options
 	if s.publicListErr != nil {
-		return nil, s.publicListErr
+		return nil, 0, s.publicListErr
 	}
-	return s.publicListed, nil
+	return s.publicListed, s.publicListTotal, nil
 }
 
 func (s *campaignServiceStub) GetPublicCampaignDetail(
@@ -77,14 +81,14 @@ func (s *campaignServiceStub) ListPublicCampaignDonors(
 	_ context.Context,
 	contractAddress string,
 	options domain.CampaignDonorListOptions,
-) ([]domain.PublicCampaignDonor, error) {
+) ([]domain.PublicCampaignDonor, int64, error) {
 	s.publicDonorCalls++
 	s.publicAddress = contractAddress
 	s.publicDonorOpts = options
 	if s.publicDonorsErr != nil {
-		return nil, s.publicDonorsErr
+		return nil, 0, s.publicDonorsErr
 	}
-	return s.publicDonors, nil
+	return s.publicDonors, s.publicDonorsTotal, nil
 }
 
 func (s *campaignServiceStub) Create(
@@ -100,14 +104,14 @@ func (s *campaignServiceStub) ListMyCampaigns(
 	_ context.Context,
 	walletAddress string,
 	options domain.CampaignListOptions,
-) ([]domain.Campaign, error) {
+) ([]domain.Campaign, int64, error) {
 	s.listCalls++
 	s.listWallet = walletAddress
 	s.listOptions = options
 	if s.listErr != nil {
-		return nil, s.listErr
+		return nil, 0, s.listErr
 	}
-	return s.listed, nil
+	return s.listed, s.listTotal, nil
 }
 
 func (s *campaignServiceStub) GetMyCampaignDetail(
@@ -365,7 +369,8 @@ func TestCampaignHandlerHandleGetMyCampaignList(t *testing.T) {
 						CreatedAt:        createdAt,
 					},
 				},
-				listErr: test.serviceError,
+				listTotal: 47,
+				listErr:   test.serviceError,
 			}
 			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
 			if err != nil {
@@ -410,6 +415,10 @@ func TestCampaignHandlerHandleGetMyCampaignList(t *testing.T) {
 			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
 			if data[0].ImageURL == nil || *data[0].ImageURL != wantImageURL {
 				t.Errorf("image URL = %#v, want %q", data[0].ImageURL, wantImageURL)
+			}
+			wantPagination := httpx.Pagination{Current: 2, PageSize: 25, TotalPages: 2, TotalItems: 47}
+			if decoded.Pagination == nil || *decoded.Pagination != wantPagination {
+				t.Errorf("pagination = %#v, want %#v", decoded.Pagination, wantPagination)
 			}
 		})
 	}
@@ -491,7 +500,8 @@ func TestCampaignHandlerHandleGetPublicCampaignList(t *testing.T) {
 						},
 					},
 				},
-				publicListErr: test.serviceError,
+				publicListTotal: 47,
+				publicListErr:   test.serviceError,
 			}
 			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
 			if err != nil {
@@ -539,6 +549,10 @@ func TestCampaignHandlerHandleGetPublicCampaignList(t *testing.T) {
 			wantCampaignImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
 			if data[0].CampaignImageURL == nil || *data[0].CampaignImageURL != wantCampaignImageURL || data[0].FundraiserImageURL != nil {
 				t.Errorf("image URLs = %#v", data[0])
+			}
+			wantPagination := httpx.NewPagination(serviceStub.publicListOptions.Page, serviceStub.publicListOptions.PageSize, 47)
+			if decoded.Pagination == nil || *decoded.Pagination != wantPagination {
+				t.Errorf("pagination = %#v, want %#v", decoded.Pagination, wantPagination)
 			}
 		})
 	}
@@ -722,8 +736,9 @@ func TestCampaignHandlerHandleGetPublicCampaignDonors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			serviceStub := &campaignServiceStub{
-				publicDonors:    test.donors,
-				publicDonorsErr: test.serviceError,
+				publicDonors:      test.donors,
+				publicDonorsTotal: 47,
+				publicDonorsErr:   test.serviceError,
 			}
 			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
 			if err != nil {
@@ -759,6 +774,10 @@ func TestCampaignHandlerHandleGetPublicCampaignDonors(t *testing.T) {
 			}
 			if test.query != "" && (serviceStub.publicDonorOpts.Sort != domain.CampaignDonorListSortTop || serviceStub.publicDonorOpts.Page != 2 || serviceStub.publicDonorOpts.PageSize != 25) {
 				t.Errorf("service options = %#v", serviceStub.publicDonorOpts)
+			}
+			wantPagination := httpx.NewPagination(serviceStub.publicDonorOpts.Page, serviceStub.publicDonorOpts.PageSize, 47)
+			if decoded.Pagination == nil || *decoded.Pagination != wantPagination {
+				t.Errorf("pagination = %#v, want %#v", decoded.Pagination, wantPagination)
 			}
 			if test.donors == nil {
 				if string(decoded.Data) != "[]" {

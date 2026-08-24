@@ -554,9 +554,10 @@
                         ]
                       }
                     },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" },
                     "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["status", "code", "message", "data", "errors"]
+                  "required": ["status", "code", "message", "data", "pagination", "errors"]
                 }
               }
             }
@@ -757,9 +758,10 @@
                         ]
                       }
                     },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" },
                     "errors": { "type": "object", "nullable": true }
                   },
-                  "required": ["status", "code", "message", "data", "errors"]
+                  "required": ["status", "code", "message", "data", "pagination", "errors"]
                 }
               }
             }
@@ -2034,6 +2036,17 @@
       }
     },
     "schemas": {
+      "Pagination": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "current": { "type": "integer", "format": "int64", "minimum": 1 },
+          "pageSize": { "type": "integer", "format": "int64", "minimum": 1, "maximum": 100 },
+          "totalPages": { "type": "integer", "format": "int64", "minimum": 0 },
+          "totalItems": { "type": "integer", "format": "int64", "minimum": 0 }
+        },
+        "required": ["current", "pageSize", "totalPages", "totalItems"]
+      },
       "AuthErrorResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -2336,9 +2349,10 @@
               "required": ["name", "address", "imageUrl", "amount", "donatedOn"]
             }
           },
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
           "errors": { "type": "object", "nullable": true }
         },
-        "required": ["status", "code", "message", "data", "errors"]
+        "required": ["status", "code", "message", "data", "pagination", "errors"]
       },
       "CampaignNotFoundError": {
         "allOf": [

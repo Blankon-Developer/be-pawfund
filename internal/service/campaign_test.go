@@ -20,11 +20,13 @@ type campaignRepositoryStub struct {
 	campaign          domain.Campaign
 	minimumEndAt      time.Time
 	listed            []domain.Campaign
+	listTotal         int64
 	listErr           error
 	listCalls         int
 	listWallet        string
 	listOptions       domain.CampaignListOptions
 	publicListed      []domain.PublicCampaignListItem
+	publicListTotal   int64
 	publicListErr     error
 	publicListCalls   int
 	publicListOptions domain.CampaignListOptions
@@ -33,6 +35,7 @@ type campaignRepositoryStub struct {
 	publicFindCalls   int
 	publicAddress     string
 	publicDonors      []domain.PublicCampaignDonor
+	publicDonorsTotal int64
 	publicDonorsErr   error
 	publicDonorCalls  int
 	publicDonorOpts   domain.CampaignDonorListOptions
@@ -46,13 +49,13 @@ type campaignRepositoryStub struct {
 func (s *campaignRepositoryStub) ListPublic(
 	_ context.Context,
 	options domain.CampaignListOptions,
-) ([]domain.PublicCampaignListItem, error) {
+) ([]domain.PublicCampaignListItem, int64, error) {
 	s.publicListCalls++
 	s.publicListOptions = options
 	if s.publicListErr != nil {
-		return nil, s.publicListErr
+		return nil, 0, s.publicListErr
 	}
-	return s.publicListed, nil
+	return s.publicListed, s.publicListTotal, nil
 }
 
 func (s *campaignRepositoryStub) FindPublicByContractAddress(
@@ -71,28 +74,28 @@ func (s *campaignRepositoryStub) ListPublicDonorsByContractAddress(
 	_ context.Context,
 	contractAddress string,
 	options domain.CampaignDonorListOptions,
-) ([]domain.PublicCampaignDonor, error) {
+) ([]domain.PublicCampaignDonor, int64, error) {
 	s.publicDonorCalls++
 	s.publicAddress = contractAddress
 	s.publicDonorOpts = options
 	if s.publicDonorsErr != nil {
-		return nil, s.publicDonorsErr
+		return nil, 0, s.publicDonorsErr
 	}
-	return s.publicDonors, nil
+	return s.publicDonors, s.publicDonorsTotal, nil
 }
 
 func (s *campaignRepositoryStub) ListForFundraiser(
 	_ context.Context,
 	walletAddress string,
 	options domain.CampaignListOptions,
-) ([]domain.Campaign, error) {
+) ([]domain.Campaign, int64, error) {
 	s.listCalls++
 	s.listWallet = walletAddress
 	s.listOptions = options
 	if s.listErr != nil {
-		return nil, s.listErr
+		return nil, 0, s.listErr
 	}
-	return s.listed, nil
+	return s.listed, s.listTotal, nil
 }
 
 func (s *campaignRepositoryStub) FindByIDForFundraiser(
@@ -225,8 +228,9 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &campaignRepositoryStub{
-				listed:  []domain.Campaign{{Title: "Emergency Rescue"}},
-				listErr: test.repositoryError,
+				listed:    []domain.Campaign{{Title: "Emergency Rescue"}},
+				listTotal: 47,
+				listErr:   test.repositoryError,
 			}
 			campaignService := NewCampaignService(repo, nil)
 			options := domain.CampaignListOptions{
@@ -237,7 +241,7 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 				PageSize: 25,
 			}
 
-			campaigns, err := campaignService.ListMyCampaigns(t.Context(), " 0xFundraiser ", options)
+			campaigns, total, err := campaignService.ListMyCampaigns(t.Context(), " 0xFundraiser ", options)
 
 			if test.wantError != nil {
 				if !errors.Is(err, test.wantError) {
@@ -252,8 +256,8 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 			if repo.listCalls != 1 || repo.listWallet != "0xFundraiser" || repo.listOptions.Search != "rescue" || repo.listOptions.Sort != domain.CampaignListSortMostDonated || repo.listOptions.Status == nil || *repo.listOptions.Status != domain.CampaignStatusActive || repo.listOptions.Page != 2 || repo.listOptions.PageSize != 25 {
 				t.Errorf("repository input = calls:%d wallet:%q options:%#v", repo.listCalls, repo.listWallet, repo.listOptions)
 			}
-			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
-				t.Errorf("campaigns = %#v", campaigns)
+			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue" || total != 47) {
+				t.Errorf("campaigns = %#v total = %d", campaigns, total)
 			}
 		})
 	}
@@ -274,8 +278,9 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &campaignRepositoryStub{
-				publicListed:  []domain.PublicCampaignListItem{{Campaign: domain.Campaign{Title: "Emergency Rescue"}}},
-				publicListErr: test.repositoryError,
+				publicListed:    []domain.PublicCampaignListItem{{Campaign: domain.Campaign{Title: "Emergency Rescue"}}},
+				publicListTotal: 47,
+				publicListErr:   test.repositoryError,
 			}
 			campaignService := NewCampaignService(repo, nil)
 			options := domain.CampaignListOptions{
@@ -285,7 +290,7 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 				PageSize: 25,
 			}
 
-			campaigns, err := campaignService.ListPublicCampaigns(t.Context(), options)
+			campaigns, total, err := campaignService.ListPublicCampaigns(t.Context(), options)
 
 			if test.wantError != nil {
 				if !errors.Is(err, test.wantError) {
@@ -300,8 +305,8 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 			if repo.publicListCalls != 1 || repo.publicListOptions.Search != "rescue" || repo.publicListOptions.Sort != domain.CampaignListSortRandom || repo.publicListOptions.Page != 2 || repo.publicListOptions.PageSize != 25 {
 				t.Errorf("repository input = calls:%d options:%#v", repo.publicListCalls, repo.publicListOptions)
 			}
-			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue") {
-				t.Errorf("campaigns = %#v", campaigns)
+			if test.wantError == nil && (len(campaigns) != 1 || campaigns[0].Title != "Emergency Rescue" || total != 47) {
+				t.Errorf("campaigns = %#v total = %d", campaigns, total)
 			}
 		})
 	}
@@ -366,13 +371,14 @@ func TestCampaignServiceListPublicCampaignDonors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &campaignRepositoryStub{
-				publicDonors:    []domain.PublicCampaignDonor{{WalletAddress: "0xDonor", Amount: 100}},
-				publicDonorsErr: test.repositoryError,
+				publicDonors:      []domain.PublicCampaignDonor{{WalletAddress: "0xDonor", Amount: 100}},
+				publicDonorsTotal: 47,
+				publicDonorsErr:   test.repositoryError,
 			}
 			campaignService := NewCampaignService(repo, nil)
 			options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 25}
 
-			donors, err := campaignService.ListPublicCampaignDonors(t.Context(), " 0xCaMpAiGn ", options)
+			donors, total, err := campaignService.ListPublicCampaignDonors(t.Context(), " 0xCaMpAiGn ", options)
 
 			if test.wantError != nil {
 				if !errors.Is(err, test.wantError) {
@@ -387,8 +393,8 @@ func TestCampaignServiceListPublicCampaignDonors(t *testing.T) {
 			if repo.publicDonorCalls != 1 || repo.publicAddress != "0xCaMpAiGn" || repo.publicDonorOpts != options {
 				t.Errorf("repository input = calls:%d address:%q options:%#v", repo.publicDonorCalls, repo.publicAddress, repo.publicDonorOpts)
 			}
-			if test.wantError == nil && (len(donors) != 1 || donors[0].WalletAddress != "0xDonor") {
-				t.Errorf("donors = %#v", donors)
+			if test.wantError == nil && (len(donors) != 1 || donors[0].WalletAddress != "0xDonor" || total != 47) {
+				t.Errorf("donors = %#v total = %d", donors, total)
 			}
 		})
 	}

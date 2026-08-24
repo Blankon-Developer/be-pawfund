@@ -20,11 +20,37 @@ func NewPostgresCampaignRepository(db *sql.DB) *PostgresCampaignRepository {
 	return &PostgresCampaignRepository{db: db}
 }
 
+const publicCampaignListFromWhere = `
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND c.deployment_status = 'deployed'
+			AND c.contract_address IS NOT NULL
+			AND (
+				$1 = ''
+				OR c.title ILIKE '%' || $1 || '%'
+				OR c.short_description ILIKE '%' || $1 || '%'
+			)
+			AND ($2::campaign_status IS NULL OR c.status = $2::campaign_status)
+`
+
 func (r *PostgresCampaignRepository) ListPublic(
 	ctx context.Context,
 	options domain.CampaignListOptions,
-) ([]domain.PublicCampaignListItem, error) {
-	const query = `
+) ([]domain.PublicCampaignListItem, int64, error) {
+	var total int64
+	if err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*)`+publicCampaignListFromWhere,
+		options.Search,
+		campaignListStatusArgument(options.Status),
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("repository: count public campaigns: %w", err)
+	}
+
+	const selectList = `
 		SELECT
 			c.id,
 			c.fundraiser_id,
@@ -45,32 +71,19 @@ func (r *PostgresCampaignRepository) ListPublic(
 			c.deployment_status,
 			c.idempotency_key,
 			f.image_object_key
-		FROM campaigns c
-		JOIN fundraisers f ON f.id = c.fundraiser_id
-		JOIN users u ON u.id = f.id
-		WHERE u.role = 'fundraiser'
-			AND u.deleted_at IS NULL
-			AND c.deployment_status = 'deployed'
-			AND c.contract_address IS NOT NULL
-			AND (
-				$1 = ''
-				OR c.title ILIKE '%' || $1 || '%'
-				OR c.short_description ILIKE '%' || $1 || '%'
-			)
-			AND ($2::campaign_status IS NULL OR c.status = $2::campaign_status)
 	`
 
 	offset := (options.Page - 1) * options.PageSize
 	rows, err := r.db.QueryContext(
 		ctx,
-		query+campaignListOrderBy(options.Sort)+" LIMIT $3 OFFSET $4",
+		selectList+publicCampaignListFromWhere+campaignListOrderBy(options.Sort)+" LIMIT $3 OFFSET $4",
 		options.Search,
 		campaignListStatusArgument(options.Status),
 		options.PageSize,
 		offset,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("repository: list public campaigns: %w", err)
+		return nil, 0, fmt.Errorf("repository: list public campaigns: %w", err)
 	}
 	defer rows.Close()
 
@@ -78,14 +91,14 @@ func (r *PostgresCampaignRepository) ListPublic(
 	for rows.Next() {
 		campaign, err := scanPublicCampaignListItem(rows)
 		if err != nil {
-			return nil, fmt.Errorf("repository: scan public campaign list: %w", err)
+			return nil, 0, fmt.Errorf("repository: scan public campaign list: %w", err)
 		}
 		campaigns = append(campaigns, campaign)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("repository: iterate public campaign list: %w", err)
+		return nil, 0, fmt.Errorf("repository: iterate public campaign list: %w", err)
 	}
-	return campaigns, nil
+	return campaigns, total, nil
 }
 
 func (r *PostgresCampaignRepository) FindPublicByContractAddress(
@@ -139,7 +152,7 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 	ctx context.Context,
 	contractAddress string,
 	options domain.CampaignDonorListOptions,
-) ([]domain.PublicCampaignDonor, error) {
+) ([]domain.PublicCampaignDonor, int64, error) {
 	const findCampaign = `
 		SELECT c.id
 		FROM campaigns c
@@ -155,9 +168,24 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 	var campaignID uuid.UUID
 	if err := r.db.QueryRowContext(ctx, findCampaign, strings.TrimSpace(contractAddress)).Scan(&campaignID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrCampaignNotFound
+			return nil, 0, ErrCampaignNotFound
 		}
-		return nil, fmt.Errorf("repository: find public campaign for donor list: %w", err)
+		return nil, 0, fmt.Errorf("repository: find public campaign for donor list: %w", err)
+	}
+
+	const countDonors = `
+		SELECT COUNT(*)
+		FROM (
+			SELECT 1
+			FROM donations d
+			WHERE d.campaign_id = $1
+			GROUP BY LOWER(d.donor_address)
+		) donor_totals
+	`
+
+	var total int64
+	if err := r.db.QueryRowContext(ctx, countDonors, campaignID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("repository: count public campaign donors: %w", err)
 	}
 
 	const query = `
@@ -197,7 +225,7 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 		offset,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("repository: list public campaign donors: %w", err)
+		return nil, 0, fmt.Errorf("repository: list public campaign donors: %w", err)
 	}
 	defer rows.Close()
 
@@ -215,7 +243,7 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 			&donor.Amount,
 			&donor.DonatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("repository: scan public campaign donor: %w", err)
+			return nil, 0, fmt.Errorf("repository: scan public campaign donor: %w", err)
 		}
 		if name.Valid {
 			donor.Name = &name.String
@@ -226,17 +254,44 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 		donors = append(donors, donor)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("repository: iterate public campaign donors: %w", err)
+		return nil, 0, fmt.Errorf("repository: iterate public campaign donors: %w", err)
 	}
-	return donors, nil
+	return donors, total, nil
 }
+
+const fundraiserCampaignListFromWhere = `
+		FROM campaigns c
+		JOIN fundraisers f ON f.id = c.fundraiser_id
+		JOIN users u ON u.id = f.id
+		WHERE u.role = 'fundraiser'
+			AND u.deleted_at IS NULL
+			AND LOWER(u.wallet_address) = LOWER($1)
+			AND (
+				$2 = ''
+				OR c.title ILIKE '%' || $2 || '%'
+				OR c.short_description ILIKE '%' || $2 || '%'
+			)
+			AND ($3::campaign_status IS NULL OR c.status = $3::campaign_status)
+`
 
 func (r *PostgresCampaignRepository) ListForFundraiser(
 	ctx context.Context,
 	walletAddress string,
 	options domain.CampaignListOptions,
-) ([]domain.Campaign, error) {
-	const query = `
+) ([]domain.Campaign, int64, error) {
+	walletAddress = strings.TrimSpace(walletAddress)
+	var total int64
+	if err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*)`+fundraiserCampaignListFromWhere,
+		walletAddress,
+		options.Search,
+		campaignListStatusArgument(options.Status),
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("repository: count campaigns for fundraiser: %w", err)
+	}
+
+	const selectList = `
 		SELECT
 			c.id,
 			c.fundraiser_id,
@@ -256,32 +311,20 @@ func (r *PostgresCampaignRepository) ListForFundraiser(
 			c.status,
 			c.deployment_status,
 			c.idempotency_key
-		FROM campaigns c
-		JOIN fundraisers f ON f.id = c.fundraiser_id
-		JOIN users u ON u.id = f.id
-		WHERE u.role = 'fundraiser'
-			AND u.deleted_at IS NULL
-			AND LOWER(u.wallet_address) = LOWER($1)
-			AND (
-				$2 = ''
-				OR c.title ILIKE '%' || $2 || '%'
-				OR c.short_description ILIKE '%' || $2 || '%'
-			)
-			AND ($3::campaign_status IS NULL OR c.status = $3::campaign_status)
 	`
 
 	offset := (options.Page - 1) * options.PageSize
 	rows, err := r.db.QueryContext(
 		ctx,
-		query+campaignListOrderBy(options.Sort)+" LIMIT $4 OFFSET $5",
-		strings.TrimSpace(walletAddress),
+		selectList+fundraiserCampaignListFromWhere+campaignListOrderBy(options.Sort)+" LIMIT $4 OFFSET $5",
+		walletAddress,
 		options.Search,
 		campaignListStatusArgument(options.Status),
 		options.PageSize,
 		offset,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("repository: list campaigns for fundraiser: %w", err)
+		return nil, 0, fmt.Errorf("repository: list campaigns for fundraiser: %w", err)
 	}
 	defer rows.Close()
 
@@ -289,14 +332,14 @@ func (r *PostgresCampaignRepository) ListForFundraiser(
 	for rows.Next() {
 		campaign, err := scanCampaign(rows)
 		if err != nil {
-			return nil, fmt.Errorf("repository: scan campaign list for fundraiser: %w", err)
+			return nil, 0, fmt.Errorf("repository: scan campaign list for fundraiser: %w", err)
 		}
 		campaigns = append(campaigns, campaign)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("repository: iterate campaign list for fundraiser: %w", err)
+		return nil, 0, fmt.Errorf("repository: iterate campaign list for fundraiser: %w", err)
 	}
-	return campaigns, nil
+	return campaigns, total, nil
 }
 
 func campaignListStatusArgument(status *domain.CampaignStatus) any {

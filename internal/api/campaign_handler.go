@@ -24,14 +24,14 @@ const (
 
 type CampaignService interface {
 	Create(ctx context.Context, input service.CreateCampaignInput) (domain.Campaign, error)
-	ListPublicCampaigns(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, error)
+	ListPublicCampaigns(ctx context.Context, options domain.CampaignListOptions) ([]domain.PublicCampaignListItem, int64, error)
 	GetPublicCampaignDetail(ctx context.Context, contractAddress string) (domain.PublicCampaignDetail, error)
 	ListPublicCampaignDonors(
 		ctx context.Context,
 		contractAddress string,
 		options domain.CampaignDonorListOptions,
-	) ([]domain.PublicCampaignDonor, error)
-	ListMyCampaigns(ctx context.Context, walletAddress string, options domain.CampaignListOptions) ([]domain.Campaign, error)
+	) ([]domain.PublicCampaignDonor, int64, error)
+	ListMyCampaigns(ctx context.Context, walletAddress string, options domain.CampaignListOptions) ([]domain.Campaign, int64, error)
 	GetMyCampaignDetail(ctx context.Context, walletAddress string, campaignID uuid.UUID) (domain.Campaign, error)
 }
 
@@ -66,7 +66,7 @@ func (h *CampaignHandler) HandleGetPublicCampaignList(w http.ResponseWriter, r *
 		options.Sort = domain.CampaignListSortRandom
 	}
 
-	campaigns, err := h.service.ListPublicCampaigns(r.Context(), options)
+	campaigns, totalItems, err := h.service.ListPublicCampaigns(r.Context(), options)
 	if err != nil {
 		h.Logger.Error("list public campaigns", "error", err)
 		h.InternalError(w)
@@ -91,7 +91,14 @@ func (h *CampaignHandler) HandleGetPublicCampaignList(w http.ResponseWriter, r *
 			Status:             campaign.Status,
 		})
 	}
-	h.Success(w, http.StatusOK, "CAMPAIGNS_RETRIEVED", "Campaigns retrieved successfully.", response)
+	h.SuccessWithPagination(
+		w,
+		http.StatusOK,
+		"CAMPAIGNS_RETRIEVED",
+		"Campaigns retrieved successfully.",
+		response,
+		httpx.NewPagination(options.Page, options.PageSize, totalItems),
+	)
 }
 
 func (h *CampaignHandler) HandleGetPublicCampaignDetail(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +157,7 @@ func (h *CampaignHandler) HandleGetPublicCampaignDonors(w http.ResponseWriter, r
 		return
 	}
 
-	donors, err := h.service.ListPublicCampaignDonors(
+	donors, totalItems, err := h.service.ListPublicCampaignDonors(
 		r.Context(),
 		strings.TrimSpace(chi.URLParam(r, "address")),
 		options,
@@ -182,12 +189,13 @@ func (h *CampaignHandler) HandleGetPublicCampaignDonors(w http.ResponseWriter, r
 			DonatedOn: donor.DonatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	h.Success(
+	h.SuccessWithPagination(
 		w,
 		http.StatusOK,
 		"CAMPAIGN_DONORS_RETRIEVED",
 		"Campaign donors retrieved successfully.",
 		response,
+		httpx.NewPagination(options.Page, options.PageSize, totalItems),
 	)
 }
 
@@ -347,7 +355,7 @@ func (h *CampaignHandler) HandleGetMyCampaignList(w http.ResponseWriter, r *http
 		return
 	}
 
-	campaigns, err := h.service.ListMyCampaigns(r.Context(), walletAddress, options)
+	campaigns, totalItems, err := h.service.ListMyCampaigns(r.Context(), walletAddress, options)
 	if err != nil {
 		h.Logger.Error("list fundraiser campaigns", "error", err)
 		h.InternalError(w)
@@ -371,7 +379,14 @@ func (h *CampaignHandler) HandleGetMyCampaignList(w http.ResponseWriter, r *http
 			Status:           campaign.Status,
 		})
 	}
-	h.Success(w, http.StatusOK, "CAMPAIGNS_RETRIEVED", "Campaigns retrieved successfully.", response)
+	h.SuccessWithPagination(
+		w,
+		http.StatusOK,
+		"CAMPAIGNS_RETRIEVED",
+		"Campaigns retrieved successfully.",
+		response,
+		httpx.NewPagination(options.Page, options.PageSize, totalItems),
+	)
 }
 
 func (h *CampaignHandler) HandleGetMyCampaignDetail(w http.ResponseWriter, r *http.Request) {

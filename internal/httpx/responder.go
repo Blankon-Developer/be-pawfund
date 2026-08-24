@@ -25,6 +25,13 @@ func (r Responder) Success(w http.ResponseWriter, status int, code, message stri
 	}
 }
 
+// SuccessWithPagination writes a success response that includes pagination metadata.
+func (r Responder) SuccessWithPagination(w http.ResponseWriter, status int, code, message string, data any, pagination Pagination) {
+	if err := WriteSuccessWithPagination(w, status, code, message, data, pagination); err != nil {
+		r.Logger.Error("write paginated success response", "code", code, "error", err)
+	}
+}
+
 // Error writes an error response.
 func (r Responder) Error(w http.ResponseWriter, status int, code, message string, fieldErrors FieldErrors) {
 	if err := WriteError(w, status, code, message, fieldErrors); err != nil {

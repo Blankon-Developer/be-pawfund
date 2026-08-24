@@ -100,10 +100,11 @@ func (s *stubSupporterRegistrar) ListMyDonations(
 }
 
 type decodedResponse struct {
-	Status string            `json:"status"`
-	Code   string            `json:"code"`
-	Data   json.RawMessage   `json:"data"`
-	Errors httpx.FieldErrors `json:"errors"`
+	Status     string            `json:"status"`
+	Code       string            `json:"code"`
+	Data       json.RawMessage   `json:"data"`
+	Pagination *httpx.Pagination `json:"pagination"`
+	Errors     httpx.FieldErrors `json:"errors"`
 }
 
 func TestHandleRegisterSupporter(t *testing.T) {

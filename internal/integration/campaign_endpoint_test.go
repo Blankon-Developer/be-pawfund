@@ -16,6 +16,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/Blankon-Developer/be-pawfund/internal/routes"
@@ -273,20 +274,21 @@ func TestGetMyCampaignListEndpoint(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		query   string
-		wantIDs []uuid.UUID
+		name           string
+		query          string
+		wantIDs        []uuid.UUID
+		wantPagination httpx.Pagination
 	}{
-		{name: "lists owned campaigns newest first", wantIDs: []uuid.UUID{active, completed, cancelled}},
-		{name: "searches titles", query: "?search=emergency", wantIDs: []uuid.UUID{active}},
-		{name: "searches short descriptions", query: "?search=mission", wantIDs: []uuid.UUID{completed}},
-		{name: "filters active campaigns", query: "?filter=active", wantIDs: []uuid.UUID{active}},
-		{name: "filters completed campaigns", query: "?filter=completed", wantIDs: []uuid.UUID{completed}},
-		{name: "filters cancelled campaigns", query: "?filter=cancelled", wantIDs: []uuid.UUID{cancelled}},
-		{name: "sorts by most donated", query: "?sortBy=most-donated", wantIDs: []uuid.UUID{active, completed, cancelled}},
-		{name: "sorts by percentage close to goal", query: "?sortBy=close-to-goal", wantIDs: []uuid.UUID{active, completed, cancelled}},
-		{name: "paginates oldest ordering", query: "?sortBy=oldest&page=2&pageSize=1", wantIDs: []uuid.UUID{completed}},
-		{name: "returns an empty page", query: "?page=5&pageSize=10", wantIDs: []uuid.UUID{}},
+		{name: "lists owned campaigns newest first", wantIDs: []uuid.UUID{active, completed, cancelled}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 3}},
+		{name: "searches titles", query: "?search=emergency", wantIDs: []uuid.UUID{active}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "searches short descriptions", query: "?search=mission", wantIDs: []uuid.UUID{completed}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters active campaigns", query: "?filter=active", wantIDs: []uuid.UUID{active}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters completed campaigns", query: "?filter=completed", wantIDs: []uuid.UUID{completed}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters cancelled campaigns", query: "?filter=cancelled", wantIDs: []uuid.UUID{cancelled}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "sorts by most donated", query: "?sortBy=most-donated", wantIDs: []uuid.UUID{active, completed, cancelled}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 3}},
+		{name: "sorts by percentage close to goal", query: "?sortBy=close-to-goal", wantIDs: []uuid.UUID{active, completed, cancelled}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 3}},
+		{name: "paginates oldest ordering", query: "?sortBy=oldest&page=2&pageSize=1", wantIDs: []uuid.UUID{completed}, wantPagination: httpx.Pagination{Current: 2, PageSize: 1, TotalPages: 3, TotalItems: 3}},
+		{name: "returns an empty page", query: "?page=5&pageSize=10", wantIDs: []uuid.UUID{}, wantPagination: httpx.Pagination{Current: 5, PageSize: 10, TotalPages: 1, TotalItems: 3}},
 	}
 
 	for _, test := range tests {
@@ -296,8 +298,9 @@ func TestGetMyCampaignListEndpoint(t *testing.T) {
 				t.Fatalf("list status = %d; body: %s", response.Code, response.Body.String())
 			}
 			var envelope struct {
-				Code string `json:"code"`
-				Data []struct {
+				Code       string           `json:"code"`
+				Pagination httpx.Pagination `json:"pagination"`
+				Data       []struct {
 					ID              uuid.UUID             `json:"id"`
 					DonorCount      int64                 `json:"donorCount"`
 					ImageURL        *string               `json:"imageUrl"`
@@ -310,6 +313,9 @@ func TestGetMyCampaignListEndpoint(t *testing.T) {
 			}
 			if envelope.Code != "CAMPAIGNS_RETRIEVED" {
 				t.Errorf("list code = %q", envelope.Code)
+			}
+			if envelope.Pagination != test.wantPagination {
+				t.Errorf("pagination = %#v, want %#v", envelope.Pagination, test.wantPagination)
 			}
 			if len(envelope.Data) != len(test.wantIDs) {
 				t.Fatalf("campaign count = %d, want %d; data: %#v", len(envelope.Data), len(test.wantIDs), envelope.Data)
@@ -391,31 +397,42 @@ func TestGetPublicCampaignListEndpoint(t *testing.T) {
 
 	router, _ := newCampaignIntegrationRouter(t)
 	tests := []struct {
-		name       string
-		query      string
-		wantIDs    []uuid.UUID
-		orderedIDs bool
+		name           string
+		query          string
+		wantIDs        []uuid.UUID
+		orderedIDs     bool
+		wantPagination httpx.Pagination
 	}{
 		{
-			name:    "lists only deployed campaigns in randomized default order",
-			wantIDs: []uuid.UUID{active, completed, cancelled},
+			name:           "lists only deployed campaigns in randomized default order",
+			wantIDs:        []uuid.UUID{active, completed, cancelled},
+			wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 3},
 		},
-		{name: "searches titles", query: "?search=emergency", wantIDs: []uuid.UUID{active}},
-		{name: "searches short descriptions", query: "?search=mission", wantIDs: []uuid.UUID{completed}},
-		{name: "filters active campaigns", query: "?filter=active", wantIDs: []uuid.UUID{active}},
-		{name: "filters completed campaigns", query: "?filter=completed", wantIDs: []uuid.UUID{completed}},
-		{name: "filters cancelled campaigns", query: "?filter=cancelled", wantIDs: []uuid.UUID{cancelled}},
+		{name: "searches titles", query: "?search=emergency", wantIDs: []uuid.UUID{active}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "searches short descriptions", query: "?search=mission", wantIDs: []uuid.UUID{completed}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters active campaigns", query: "?filter=active", wantIDs: []uuid.UUID{active}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters completed campaigns", query: "?filter=completed", wantIDs: []uuid.UUID{completed}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
+		{name: "filters cancelled campaigns", query: "?filter=cancelled", wantIDs: []uuid.UUID{cancelled}, wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 1}},
 		{
-			name:       "sorts by most donated when requested",
-			query:      "?sortBy=most-donated",
-			wantIDs:    []uuid.UUID{active, completed, cancelled},
-			orderedIDs: true,
+			name:           "sorts by most donated when requested",
+			query:          "?sortBy=most-donated",
+			wantIDs:        []uuid.UUID{active, completed, cancelled},
+			orderedIDs:     true,
+			wantPagination: httpx.Pagination{Current: 1, PageSize: 10, TotalPages: 1, TotalItems: 3},
 		},
 		{
-			name:       "paginates explicit oldest ordering",
-			query:      "?sortBy=oldest&page=2&pageSize=1",
-			wantIDs:    []uuid.UUID{completed},
-			orderedIDs: true,
+			name:           "paginates explicit oldest ordering",
+			query:          "?sortBy=oldest&page=2&pageSize=1",
+			wantIDs:        []uuid.UUID{completed},
+			orderedIDs:     true,
+			wantPagination: httpx.Pagination{Current: 2, PageSize: 1, TotalPages: 3, TotalItems: 3},
+		},
+		{
+			name:           "returns an empty page",
+			query:          "?page=5&pageSize=10",
+			wantIDs:        []uuid.UUID{},
+			orderedIDs:     true,
+			wantPagination: httpx.Pagination{Current: 5, PageSize: 10, TotalPages: 1, TotalItems: 3},
 		},
 	}
 
@@ -429,8 +446,9 @@ func TestGetPublicCampaignListEndpoint(t *testing.T) {
 				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
 			}
 			var envelope struct {
-				Code string `json:"code"`
-				Data []struct {
+				Code       string           `json:"code"`
+				Pagination httpx.Pagination `json:"pagination"`
+				Data       []struct {
 					ID                 uuid.UUID             `json:"id"`
 					CampaignImageURL   *string               `json:"campaignImageUrl"`
 					FundraiserImageURL *string               `json:"fundraiserImageUrl"`
@@ -443,6 +461,9 @@ func TestGetPublicCampaignListEndpoint(t *testing.T) {
 			}
 			if envelope.Code != "CAMPAIGNS_RETRIEVED" {
 				t.Errorf("list code = %q", envelope.Code)
+			}
+			if envelope.Pagination != test.wantPagination {
+				t.Errorf("pagination = %#v, want %#v", envelope.Pagination, test.wantPagination)
 			}
 			if len(envelope.Data) != len(test.wantIDs) {
 				t.Fatalf("campaign count = %d, want %d; data: %#v", len(envelope.Data), len(test.wantIDs), envelope.Data)
@@ -619,9 +640,10 @@ func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
 	}
 	var envelope struct {
-		Status string `json:"status"`
-		Code   string `json:"code"`
-		Data   []struct {
+		Status     string           `json:"status"`
+		Code       string           `json:"code"`
+		Pagination httpx.Pagination `json:"pagination"`
+		Data       []struct {
 			Name      *string `json:"name"`
 			Address   string  `json:"address"`
 			ImageURL  *string `json:"imageUrl"`
@@ -633,8 +655,12 @@ func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
 		t.Fatalf("decode donor list response: %v", err)
 	}
 	wantImageURL := "https://cdn.example.com/pawfund/profiles/public-donor.png"
+	wantPagination := httpx.Pagination{Current: 1, PageSize: 1, TotalPages: 2, TotalItems: 2}
 	if envelope.Status != "success" || envelope.Code != "CAMPAIGN_DONORS_RETRIEVED" || len(envelope.Data) != 1 {
 		t.Fatalf("donor list envelope = %#v", envelope)
+	}
+	if envelope.Pagination != wantPagination {
+		t.Errorf("donor list pagination = %#v, want %#v", envelope.Pagination, wantPagination)
 	}
 	if envelope.Data[0].Name == nil || *envelope.Data[0].Name != donor.Name || envelope.Data[0].Address != donor.WalletAddress || envelope.Data[0].ImageURL == nil || *envelope.Data[0].ImageURL != wantImageURL || envelope.Data[0].Amount != 300 || envelope.Data[0].DonatedOn != "2026-08-09T10:00:00Z" {
 		t.Errorf("donor list item = %#v", envelope.Data[0])
@@ -642,10 +668,15 @@ func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
 
 	emptyPage := requestPublicCampaignDonors(t, router, contractAddress, "?page=3&pageSize=1")
 	var emptyEnvelope struct {
-		Data json.RawMessage `json:"data"`
+		Data       json.RawMessage  `json:"data"`
+		Pagination httpx.Pagination `json:"pagination"`
 	}
+	wantEmptyPagination := httpx.Pagination{Current: 3, PageSize: 1, TotalPages: 2, TotalItems: 2}
 	if emptyPage.Code != http.StatusOK || json.Unmarshal(emptyPage.Body.Bytes(), &emptyEnvelope) != nil || string(emptyEnvelope.Data) != "[]" {
 		t.Errorf("empty donor page status/body = %d/%s", emptyPage.Code, emptyPage.Body.String())
+	}
+	if emptyEnvelope.Pagination != wantEmptyPagination {
+		t.Errorf("empty donor page pagination = %#v, want %#v", emptyEnvelope.Pagination, wantEmptyPagination)
 	}
 
 	invalid := decodeAuthEndpointResult(t, requestPublicCampaignDonors(t, router, contractAddress, "?sortBy=largest&page=0&pageSize=101"))

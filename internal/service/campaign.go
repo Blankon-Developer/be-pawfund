@@ -49,13 +49,13 @@ func NewCampaignService(repo repository.CampaignRepository, generateID IDGenerat
 func (s *CampaignService) ListPublicCampaigns(
 	ctx context.Context,
 	options domain.CampaignListOptions,
-) ([]domain.PublicCampaignListItem, error) {
+) ([]domain.PublicCampaignListItem, int64, error) {
 	options.Search = strings.TrimSpace(options.Search)
-	campaigns, err := s.repository.ListPublic(ctx, options)
+	campaigns, total, err := s.repository.ListPublic(ctx, options)
 	if err != nil {
-		return nil, fmt.Errorf("service: list public campaigns: %w", err)
+		return nil, 0, fmt.Errorf("service: list public campaigns: %w", err)
 	}
-	return campaigns, nil
+	return campaigns, total, nil
 }
 
 func (s *CampaignService) GetPublicCampaignDetail(
@@ -76,32 +76,32 @@ func (s *CampaignService) ListPublicCampaignDonors(
 	ctx context.Context,
 	contractAddress string,
 	options domain.CampaignDonorListOptions,
-) ([]domain.PublicCampaignDonor, error) {
-	donors, err := s.repository.ListPublicDonorsByContractAddress(
+) ([]domain.PublicCampaignDonor, int64, error) {
+	donors, total, err := s.repository.ListPublicDonorsByContractAddress(
 		ctx,
 		strings.TrimSpace(contractAddress),
 		options,
 	)
 	if err != nil {
 		if errors.Is(err, repository.ErrCampaignNotFound) {
-			return nil, ErrCampaignNotFound
+			return nil, 0, ErrCampaignNotFound
 		}
-		return nil, fmt.Errorf("service: list public campaign donors: %w", err)
+		return nil, 0, fmt.Errorf("service: list public campaign donors: %w", err)
 	}
-	return donors, nil
+	return donors, total, nil
 }
 
 func (s *CampaignService) ListMyCampaigns(
 	ctx context.Context,
 	walletAddress string,
 	options domain.CampaignListOptions,
-) ([]domain.Campaign, error) {
+) ([]domain.Campaign, int64, error) {
 	options.Search = strings.TrimSpace(options.Search)
-	campaigns, err := s.repository.ListForFundraiser(ctx, strings.TrimSpace(walletAddress), options)
+	campaigns, total, err := s.repository.ListForFundraiser(ctx, strings.TrimSpace(walletAddress), options)
 	if err != nil {
-		return nil, fmt.Errorf("service: list fundraiser campaigns: %w", err)
+		return nil, 0, fmt.Errorf("service: list fundraiser campaigns: %w", err)
 	}
-	return campaigns, nil
+	return campaigns, total, nil
 }
 
 func (s *CampaignService) GetMyCampaignDetail(

@@ -337,13 +337,16 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		t.Fatalf("soft-delete donor profile: %v", err)
 	}
 
-	recent, err := campaignRepo.ListPublicDonorsByContractAddress(
+	recent, recentTotal, err := campaignRepo.ListPublicDonorsByContractAddress(
 		t.Context(),
 		strings.ToLower(contractAddress),
 		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 2},
 	)
 	if err != nil {
 		t.Fatalf("ListPublicDonorsByContractAddress(recent) unexpected error: %v", err)
+	}
+	if recentTotal != 3 {
+		t.Errorf("recent donor total = %d, want 3", recentTotal)
 	}
 	if len(recent) != 2 || recent[0].WalletAddress != "0xguestdonor" || recent[0].Amount != 700 || !recent[0].DonatedAt.Equal(createdAt.Add(4*time.Hour)) {
 		t.Fatalf("recent donors = %#v", recent)
@@ -355,7 +358,7 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		t.Errorf("registered donor = %#v", recent[1])
 	}
 
-	top, err := campaignRepo.ListPublicDonorsByContractAddress(
+	top, topTotal, err := campaignRepo.ListPublicDonorsByContractAddress(
 		t.Context(),
 		contractAddress,
 		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 1, PageSize: 2},
@@ -363,17 +366,20 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 	if err != nil {
 		t.Fatalf("ListPublicDonorsByContractAddress(top) unexpected error: %v", err)
 	}
+	if topTotal != 3 {
+		t.Errorf("top donor total = %d, want 3", topTotal)
+	}
 	if len(top) != 2 || top[0].WalletAddress != deleted.WalletAddress || top[0].Amount != 900 || top[0].Name != nil || top[1].Amount != 700 {
 		t.Errorf("top donors = %#v", top)
 	}
 
-	secondPage, err := campaignRepo.ListPublicDonorsByContractAddress(
+	secondPage, secondPageTotal, err := campaignRepo.ListPublicDonorsByContractAddress(
 		t.Context(),
 		contractAddress,
 		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 2},
 	)
-	if err != nil || len(secondPage) != 1 || secondPage[0].WalletAddress != registered.WalletAddress {
-		t.Errorf("top second page = %#v, err=%v", secondPage, err)
+	if err != nil || len(secondPage) != 1 || secondPage[0].WalletAddress != registered.WalletAddress || secondPageTotal != 3 {
+		t.Errorf("top second page = %#v total=%d, err=%v", secondPage, secondPageTotal, err)
 	}
 
 	emptyCampaignID := mustCreatePublicListedCampaign(
@@ -395,13 +401,13 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 	).Scan(&emptyAddress); err != nil {
 		t.Fatalf("get empty campaign address: %v", err)
 	}
-	empty, err := campaignRepo.ListPublicDonorsByContractAddress(
+	empty, emptyTotal, err := campaignRepo.ListPublicDonorsByContractAddress(
 		t.Context(),
 		emptyAddress,
 		domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 10},
 	)
-	if err != nil || empty == nil || len(empty) != 0 {
-		t.Errorf("empty campaign donors = %#v, err=%v", empty, err)
+	if err != nil || empty == nil || len(empty) != 0 || emptyTotal != 0 {
+		t.Errorf("empty campaign donors = %#v total=%d, err=%v", empty, emptyTotal, err)
 	}
 
 	hiddenCampaignID := mustCreatePublicListedCampaign(
@@ -425,10 +431,10 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		t.Fatalf("set hidden campaign address: %v", err)
 	}
 	options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 10}
-	if _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), hiddenAddress, options); !errors.Is(err, repository.ErrCampaignNotFound) {
+	if _, _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), hiddenAddress, options); !errors.Is(err, repository.ErrCampaignNotFound) {
 		t.Errorf("hidden campaign error = %v, want ErrCampaignNotFound", err)
 	}
-	if _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), "0xUnknown", options); !errors.Is(err, repository.ErrCampaignNotFound) {
+	if _, _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), "0xUnknown", options); !errors.Is(err, repository.ErrCampaignNotFound) {
 		t.Errorf("unknown campaign error = %v, want ErrCampaignNotFound", err)
 	}
 }

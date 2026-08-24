@@ -18,12 +18,33 @@ func (e FieldErrors) Add(field, message string) {
 	e[field] = append(e[field], message)
 }
 
+type Pagination struct {
+	Current    int64 `json:"current"`
+	PageSize   int64 `json:"pageSize"`
+	TotalPages int64 `json:"totalPages"`
+	TotalItems int64 `json:"totalItems"`
+}
+
+func NewPagination(current, pageSize, totalItems int64) Pagination {
+	var totalPages int64
+	if pageSize > 0 && totalItems > 0 {
+		totalPages = (totalItems + pageSize - 1) / pageSize
+	}
+	return Pagination{
+		Current:    current,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+		TotalItems: totalItems,
+	}
+}
+
 type Response struct {
-	Status  ResponseStatus `json:"status"`
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Data    any            `json:"data"`
-	Errors  FieldErrors    `json:"errors"`
+	Status     ResponseStatus `json:"status"`
+	Code       string         `json:"code"`
+	Message    string         `json:"message"`
+	Data       any            `json:"data"`
+	Pagination *Pagination    `json:"pagination,omitempty"`
+	Errors     FieldErrors    `json:"errors"`
 }
 
 func WriteSuccess(w http.ResponseWriter, status int, code, message string, data any) error {
@@ -33,6 +54,17 @@ func WriteSuccess(w http.ResponseWriter, status int, code, message string, data 
 		Message: message,
 		Data:    data,
 		Errors:  nil,
+	})
+}
+
+func WriteSuccessWithPagination(w http.ResponseWriter, status int, code, message string, data any, pagination Pagination) error {
+	return WriteJSON(w, status, Response{
+		Status:     StatusSuccess,
+		Code:       code,
+		Message:    message,
+		Data:       data,
+		Pagination: &pagination,
+		Errors:     nil,
 	})
 }
 
