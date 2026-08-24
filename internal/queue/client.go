@@ -146,26 +146,22 @@ func handshakeDeadline(ctx context.Context, timeout time.Duration) time.Time {
 	return deadline
 }
 
-// watchForCancel spawns a goroutine that forces conn's deadline to expire the
+// watchForCancel arranges for conn's deadline to be forced to expire the
 // instant ctx is canceled, so a canceled dial doesn't have to wait out the
 // full handshake deadline set by the caller. The returned stop func must be
-// called exactly once, after the dial finishes, to release the goroutine.
+// called exactly once, after the dial finishes: it guarantees that once it
+// returns, the deadline will never be touched again.
 func watchForCancel(ctx context.Context, conn net.Conn) func() {
-	stopped := make(chan struct{})
 	done := make(chan struct{})
-
-	go func() {
+	stop := context.AfterFunc(ctx, func() {
 		defer close(done)
-		select {
-		case <-ctx.Done():
-			_ = conn.SetDeadline(time.Now())
-		case <-stopped:
-		}
-	}()
+		_ = conn.SetDeadline(time.Now())
+	})
 
 	return func() {
-		close(stopped)
-		<-done
+		if !stop() {
+			<-done // ctx already fired; wait for the deadline to be set.
+		}
 	}
 }
 
@@ -255,65 +251,109 @@ func (q *QueueClient) Close() error {
 // reconnectLoop watches for connection closure events and re-dials with
 // exponential back-off up to maxDelay. It exits when Close is called.
 func (q *QueueClient) reconnectLoop() {
+	for {
+		if !q.waitForDrop(q.Conn()) {
+			return
+		}
+
+		newConn, ok := q.redialWithBackoff()
+		if !ok {
+			return
+		}
+
+		// Atomically check the shutdown flag and swap in the new connection
+		// under the same lock, so a concurrent Close() can never race with
+		// this assignment and leave newConn dangling.
+		q.mu.Lock()
+		if q.closed {
+			q.mu.Unlock()
+			_ = newConn.Close()
+			return
+		}
+		q.conn = newConn
+		q.mu.Unlock()
+
+		q.logger.Info("queue: reconnected successfully")
+		q.notifyReconnect()
+	}
+}
+
+// waitForDrop blocks until conn is closed. It returns false if that closure
+// was a clean shutdown triggered by Close (the caller must stop looping), or
+// true if the connection dropped unexpectedly and a reconnect should be
+// attempted.
+func (q *QueueClient) waitForDrop(conn *amqp.Connection) bool {
+	notifyClose := conn.NotifyClose(make(chan *amqp.Error, 1))
+
+	select {
+	case <-q.done:
+		return false
+	case amqpErr, ok := <-notifyClose:
+		if !ok {
+			// Connection was closed cleanly by Close(); stop the loop.
+			return false
+		}
+		q.logger.Warn("queue: connection closed unexpectedly, will reconnect",
+			"reason", amqpErr)
+		return true
+	}
+}
+
+// redialWithBackoff retries reconnectDial with exponential back-off, up to
+// maxDelay between attempts, until it succeeds or Close is called. ok is
+// false only in the latter case, in which case the caller must stop looping.
+func (q *QueueClient) redialWithBackoff() (conn *amqp.Connection, ok bool) {
 	const (
 		initialDelay = 1 * time.Second
 		maxDelay     = 30 * time.Second
 		factor       = 2
 	)
 
+	delay := initialDelay
 	for {
-		q.mu.RLock()
-		conn := q.conn
-		q.mu.RUnlock()
+		timer := time.NewTimer(delay)
+		select {
+		case <-q.done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, false
+		case <-timer.C:
+		}
 
-		notifyClose := conn.NotifyClose(make(chan *amqp.Error, 1))
+		conn, err := q.reconnectDial()
+		if err == nil {
+			return conn, true
+		}
 
 		select {
 		case <-q.done:
-			return
-		case amqpErr, ok := <-notifyClose:
-			if !ok {
-				// Connection was closed cleanly by Close(); stop the loop.
-				return
-			}
-			q.logger.Warn("queue: connection closed unexpectedly, will reconnect",
-				"reason", amqpErr)
+			return nil, false
+		default:
 		}
-
-		delay := initialDelay
-		for {
-			select {
-			case <-q.done:
-				return
-			case <-time.After(delay):
-			}
-
-			newConn, err := amqp.DialConfig(q.url, connectionConfig(q.connectionName))
-			if err != nil {
-				q.logger.Warn("queue: reconnect attempt failed",
-					"error", err,
-					"next_delay", delay)
-				delay = min(delay*factor, maxDelay)
-				continue
-			}
-
-			// Atomically check the shutdown flag and swap in the new
-			// connection under the same lock, so a concurrent Close() can
-			// never race with this assignment and leave newConn dangling.
-			q.mu.Lock()
-			if q.closed {
-				q.mu.Unlock()
-				_ = newConn.Close()
-				return
-			}
-			q.conn = newConn
-			q.mu.Unlock()
-
-			q.logger.Info("queue: reconnected successfully")
-			q.notifyReconnect()
-			break
-		}
+		q.logger.Warn("queue: reconnect attempt failed",
+			"error", err,
+			"next_delay", delay)
+		delay = min(delay*factor, maxDelay)
 	}
+}
+
+// reconnectDial dials using the same path as Open, canceled as soon as Close
+// is called. Per-attempt timeout still comes from the AMQP URL / default
+// handshake deadline inside dialContext; the context here is only for shutdown.
+func (q *QueueClient) reconnectDial() (*amqp.Connection, error) {
+	dialCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		select {
+		case <-q.done:
+			cancel()
+		case <-dialCtx.Done():
+		}
+	}()
+
+	return dialContext(dialCtx, q.url, q.connectionName)
 }
 
 // notifyReconnect delivers a non-blocking notification to every subscriber

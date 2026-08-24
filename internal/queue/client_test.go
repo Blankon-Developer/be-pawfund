@@ -59,6 +59,47 @@ func TestDialContextCancellationInterruptsHandshake(t *testing.T) {
 	}
 }
 
+func TestReconnectDialAbortsWhenClientCloses(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan struct{})
+	serverDone := make(chan struct{})
+	defer close(serverDone)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		close(accepted)
+		<-serverDone
+	}()
+
+	client := &QueueClient{
+		url:    "amqp://guest:guest@" + listener.Addr().String() + "/",
+		done:   make(chan struct{}),
+		logger: slog.Default(),
+	}
+
+	go func() {
+		<-accepted
+		_ = client.Close()
+	}()
+
+	started := time.Now()
+	_, err = client.reconnectDial()
+	if err == nil {
+		t.Fatal("reconnectDial() expected an error after Close")
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("reconnectDial() returned after %s, want at most 1s", elapsed)
+	}
+}
+
 func TestConnectionConfigSetsClientConnectionName(t *testing.T) {
 	config := connectionConfig("pawfund-test")
 	if got := config.Properties["connection_name"]; got != "pawfund-test" {
