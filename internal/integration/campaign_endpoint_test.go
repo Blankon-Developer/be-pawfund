@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
-	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -30,7 +30,7 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 	t.Cleanup(func() { cleanDatabase(t) })
 
 	const walletAddress = "0xFundraiserChecksum"
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	fundraiser := newFundraiser("rescue@example.com", walletAddress, nil)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 
@@ -140,8 +140,8 @@ func TestGetMyCampaignDetailEndpoint(t *testing.T) {
 		ownerWallet = "0xFundraiserChecksum"
 		otherWallet = "0xOtherFundraiser"
 	)
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
 	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("owner@example.com", ownerWallet, nil))
 	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("other@example.com", otherWallet, nil))
 	campaign, err := campaignRepo.CreatePending(
@@ -220,7 +220,7 @@ func TestGetMyCampaignListEndpoint(t *testing.T) {
 		ownerWallet = "0xFundraiserChecksum"
 		otherWallet = "0xOtherFundraiser"
 	)
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	owner := newFundraiser("owner@example.com", ownerWallet, nil)
 	other := newFundraiser("other@example.com", otherWallet, nil)
 	mustCreateFundraiser(t, fundraiserRepo, owner)
@@ -346,7 +346,7 @@ func TestGetPublicCampaignListEndpoint(t *testing.T) {
 	t.Cleanup(func() { cleanDatabase(t) })
 
 	fundraiserImageObjectKey := "profiles/public-fundraiser.png"
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	fundraiser := newFundraiser("public@example.com", "0xPublicFundraiser", &fundraiserImageObjectKey)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 
@@ -506,7 +506,7 @@ func TestGetPublicCampaignDetailEndpoint(t *testing.T) {
 	t.Cleanup(func() { cleanDatabase(t) })
 
 	fundraiserImageObjectKey := "profiles/public-fundraiser.png"
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	fundraiser := newFundraiser("public@example.com", "0xPublicFundraiser", &fundraiserImageObjectKey)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 
@@ -599,7 +599,7 @@ func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
 	cleanDatabase(t)
 	t.Cleanup(func() { cleanDatabase(t) })
 
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	fundraiser := newFundraiser("campaign-donors@example.com", "0xCampaignDonorFundraiser", nil)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 	createdAt := time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
@@ -624,7 +624,7 @@ func TestGetPublicCampaignDonorsEndpoint(t *testing.T) {
 	}
 
 	imageObjectKey := "profiles/public-donor.png"
-	supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+	supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 	donor := newSupporter("public-donor@example.com", "0xPublicDonor", &imageObjectKey)
 	mustCreateSupporter(t, supporterRepo, donor)
 	mustCreateDonationForAddress(t, campaignID, &donor.ID, donor.WalletAddress, 100, "0xPublicDonorFirst", createdAt.Add(time.Hour), 10, 0)
@@ -701,10 +701,10 @@ func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager)
 	if err != nil {
 		t.Fatalf("create public URL builder: %v", err)
 	}
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
 	campaignService := service.NewCampaignService(campaignRepo, uuid.NewV7)
 	application := &app.Application{
-		CampaignHandler: api.NewCampaignHandler(campaignService, urlBuilder, logger),
+		CampaignHandler: handler.NewCampaignHandler(campaignService, urlBuilder, logger),
 		Authenticate:    appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

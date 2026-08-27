@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +29,7 @@ func TestPostgresAuthRepositoryFindProfileByWalletAddress(t *testing.T) {
 		{
 			name: "finds supporter case-insensitively",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				supporter := newSupporter("supporter@example.com", supporterWallet, &imageKey)
 				supporter.Name = "Cat Lover"
 				mustCreateSupporter(t, repo, supporter)
@@ -82,7 +82,7 @@ func TestPostgresAuthRepositoryFindProfileByWalletAddress(t *testing.T) {
 				test.prepare(t)
 			}
 
-			repo := repository.NewPostgresAuthRepository(testDatabase)
+			repo := database.NewPostgresAuthRepository(testDatabase)
 			profile, found, err := repo.FindProfileByWalletAddress(t.Context(), test.address)
 			if test.wantError {
 				if err == nil {

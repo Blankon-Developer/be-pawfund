@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 )
@@ -172,7 +172,7 @@ func newUploadIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager) {
 	}
 	uploadService := service.NewUploadService(presigner, uuid.NewV7)
 	application := &app.Application{
-		UploadHandler: api.NewUploadHandler(uploadService, logger),
+		UploadHandler: handler.NewUploadHandler(uploadService, logger),
 		Authenticate:  appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

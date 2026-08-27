@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 )
 
 func TestGetMyDonationsEndpoint(t *testing.T) {
@@ -32,10 +32,10 @@ func TestGetMyDonationsEndpoint(t *testing.T) {
 		{
 			name: "returns the requested donation page newest first",
 			prepare: func(t *testing.T) {
-				supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+				supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 				supporter := newSupporter("supporter@example.com", supporterWallet, nil)
 				mustCreateSupporter(t, supporterRepo, supporter)
-				fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+				fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 				fundraiser := newFundraiser("fundraiser@example.com", "0xFundraiser", nil)
 				mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 				campaignID, _ := mustCreateDonationCampaign(t, fundraiser.ID, "Emergency Rescue")
@@ -53,7 +53,7 @@ func TestGetMyDonationsEndpoint(t *testing.T) {
 		{
 			name: "returns an empty array for an active supporter without donations",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateSupporter(t, repo, newSupporter("supporter@example.com", supporterWallet, nil))
 			},
 			walletAddress: supporterWallet,

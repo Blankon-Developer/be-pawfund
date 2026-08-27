@@ -13,7 +13,7 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
 )
 
 func main() {

@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 )
@@ -47,7 +47,7 @@ func TestGetFundraiserProfileEndpoint(t *testing.T) {
 		{
 			name: "returns authenticated fundraiser profile",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &imageKey))
 			},
 			authorization: "valid",
@@ -61,7 +61,7 @@ func TestGetFundraiserProfileEndpoint(t *testing.T) {
 		{
 			name: "returns not found for supporter wallet",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateSupporter(t, repo, newSupporter("supporter@example.com", supporterWallet, nil))
 			},
 			authorization: "valid",
@@ -182,7 +182,7 @@ func TestGetPublicFundraiserProfileEndpoint(t *testing.T) {
 		{
 			name: "returns fundraiser profile without access token",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &imageKey))
 			},
 			address:      strings.ToLower(fundraiserWallet),
@@ -298,10 +298,10 @@ func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 			putProfileImageObject(t, oldImageObjectKey)
 			putProfileImageObject(t, newImageObjectKey)
 
-			fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+			fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 			mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
 			if test.shareOldImage {
-				supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+				supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &oldImageObjectKey))
 			}
 
@@ -413,11 +413,11 @@ func TestDeleteFundraiserProfileEndpoint(t *testing.T) {
 
 			if test.createProfile {
 				putProfileImageObject(t, imageObjectKey)
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				fundraiser := newFundraiser("rescue@example.com", fundraiserWallet, &imageObjectKey)
 				mustCreateFundraiser(t, repo, fundraiser)
 				if test.shareImage {
-					supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+					supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 					mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &imageObjectKey))
 				}
 				if test.activeCampaign {
@@ -531,7 +531,7 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 	if err != nil {
 		t.Fatalf("create URL builder: %v", err)
 	}
-	fundraiserRepository := repository.NewPostgresFundraiserRepository(testDatabase)
+	fundraiserRepository := database.NewPostgresFundraiserRepository(testDatabase)
 	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
 		Endpoint:  testStorageEndpoint,
 		AccessKey: testStorageAccessKey,
@@ -545,9 +545,9 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
 	application := &app.Application{
 		DB:                testDatabase,
-		AuthHandler:       api.NewAuthHandler(nil, urlBuilder, logger),
-		SupporterHandler:  api.NewSupporterHandler(nil, urlBuilder, logger),
-		FundraiserHandler: api.NewFundraiserHandler(fundraiserService, urlBuilder, logger),
+		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, logger),
+		SupporterHandler:  handler.NewSupporterHandler(nil, urlBuilder, logger),
+		FundraiserHandler: handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger),
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

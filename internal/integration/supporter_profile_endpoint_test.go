@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 )
@@ -46,7 +46,7 @@ func TestGetSupporterProfileEndpoint(t *testing.T) {
 		{
 			name: "returns authenticated supporter profile",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateSupporter(t, repo, newSupporter("cat@example.com", supporterWallet, &imageKey))
 			},
 			authorization: "valid",
@@ -60,7 +60,7 @@ func TestGetSupporterProfileEndpoint(t *testing.T) {
 		{
 			name: "returns not found for fundraiser wallet",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, nil))
 			},
 			authorization: "valid",
@@ -178,10 +178,10 @@ func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 			putProfileImageObject(t, oldImageObjectKey)
 			putProfileImageObject(t, newImageObjectKey)
 
-			supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+			supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 			mustCreateSupporter(t, supporterRepo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
 			if test.shareOldImage {
-				fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+				fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", "0xFundraiser", &oldImageObjectKey))
 			}
 
@@ -270,11 +270,11 @@ func TestDeleteSupporterProfileEndpoint(t *testing.T) {
 
 			if test.createProfile {
 				putProfileImageObject(t, imageObjectKey)
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				supporter := newSupporter("supporter@example.com", supporterWallet, &imageObjectKey)
 				mustCreateSupporter(t, repo, supporter)
 				if test.shareImage {
-					fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
+					fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 					mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", "0xFundraiser", &imageObjectKey))
 				}
 			}
@@ -348,7 +348,7 @@ func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWT
 	if err != nil {
 		t.Fatalf("create URL builder: %v", err)
 	}
-	supporterRepository := repository.NewPostgresSupporterRepository(testDatabase)
+	supporterRepository := database.NewPostgresSupporterRepository(testDatabase)
 	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
 		Endpoint:  testStorageEndpoint,
 		AccessKey: testStorageAccessKey,
@@ -362,9 +362,9 @@ func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWT
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
 	application := &app.Application{
 		DB:                testDatabase,
-		AuthHandler:       api.NewAuthHandler(nil, urlBuilder, logger),
-		SupporterHandler:  api.NewSupporterHandler(supporterService, urlBuilder, logger),
-		FundraiserHandler: api.NewFundraiserHandler(nil, urlBuilder, logger),
+		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, logger),
+		SupporterHandler:  handler.NewSupporterHandler(supporterService, urlBuilder, logger),
+		FundraiserHandler: handler.NewFundraiserHandler(nil, urlBuilder, logger),
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

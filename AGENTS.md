@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-This Go backend starts at `cmd/api/main.go`. Application code lives under `internal/`: `api` contains HTTP handlers and DTOs, `routes` maps Chi routes, `service` implements business rules, `repository` handles PostgreSQL, and `domain` defines core types. Supporting packages cover auth, caching, configuration, middleware, response helpers, and storage URLs. Timestamped Goose migrations live in `migrations/`. Unit tests sit beside their packages; broader tests live in `internal/integration/`.
+This Go backend starts at `cmd/api/main.go`. Application code lives under `internal/`: `http/handler` contains HTTP handlers and DTOs, `http/routes` maps Chi routes, `http/middleware` and `http/httpx` cover shared HTTP helpers, `service` implements business rules, `repository` holds persistence contracts, `infra/database` implements PostgreSQL adapters, and `domain` defines core types. Supporting packages cover auth, configuration, and infrastructure adapters under `infra/` (`cache`, `queue`, `storage`). Timestamped Goose migrations live in `migrations/`. Unit tests sit beside their packages; broader tests live in `internal/integration/`.
 
-Keep dependencies flowing from transport to service to repository/domain. Wire new components in `internal/app/app.go` and register endpoints in `internal/routes/routes.go`.
+Keep dependencies flowing from transport to service to repository/domain. Wire new components in `internal/app/app.go` and register endpoints in `internal/http/routes/routes.go`.
 
 ## Build, Test, and Development Commands
 
@@ -18,7 +18,7 @@ Keep dependencies flowing from transport to service to repository/domain. Wire n
 
 ## Coding Style & Naming Conventions
 
-Use `gofmt` formatting (tabs for Go indentation) and idiomatic import grouping. Package names are short and lowercase; exported identifiers use `PascalCase`, locals use `camelCase`, and filenames use lowercase snake case, such as `supporter_postgres.go`. Accept `context.Context` at I/O boundaries, wrap errors with operation context and `%w`, and keep HTTP envelopes in `internal/httpx`.
+Use `gofmt` formatting (tabs for Go indentation) and idiomatic import grouping. Package names are short and lowercase; exported identifiers use `PascalCase`, locals use `camelCase`, and filenames use lowercase snake case, such as `supporter_postgres.go`. Accept `context.Context` at I/O boundaries, wrap errors with operation context and `%w`, and keep HTTP envelopes in `internal/http/httpx`.
 
 ## Testing Guidelines
 

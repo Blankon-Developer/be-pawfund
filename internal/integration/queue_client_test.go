@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/queue"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/queue"
 )
 
 func TestQueueClientConnectsAndDeclaresQueue(t *testing.T) {

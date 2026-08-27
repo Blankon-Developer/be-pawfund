@@ -1,2 +1,2 @@
-// Package repository contains persistence adapters for domain entities.
+// Package repository contains persistence contracts for domain entities.
 package repository

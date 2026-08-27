@@ -19,9 +19,9 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
-	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/spruceid/siwe-go"
 )
@@ -54,7 +54,7 @@ func TestAuthEndpoints(t *testing.T) {
 		{
 			name: "returns supporter profile",
 			prepare: func(t *testing.T, walletAddress string) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				supporter := newSupporter("cat@example.com", walletAddress, &imageKey)
 				supporter.Name = "Cat Lover"
 				mustCreateSupporter(t, repo, supporter)
@@ -208,7 +208,7 @@ func TestGetMeEndpoint(t *testing.T) {
 		{
 			name: "returns supporter profile",
 			prepare: func(t *testing.T, walletAddress string) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				supporter := newSupporter("cat@example.com", walletAddress, &imageKey)
 				supporter.Name = "Cat Lover"
 				mustCreateSupporter(t, repo, supporter)

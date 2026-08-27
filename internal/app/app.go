@@ -8,15 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
-	"github.com/Blankon-Developer/be-pawfund/internal/cache"
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/queue"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/cache"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/queue"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -24,17 +24,17 @@ type Application struct {
 	DB                 *sql.DB
 	Cache              *cache.CacheClient
 	Queue              *queue.QueueClient
-	AuthHandler        *api.AuthHandler
-	UploadHandler      *api.UploadHandler
-	SupporterHandler   *api.SupporterHandler
-	FundraiserHandler  *api.FundraiserHandler
-	CampaignHandler    *api.CampaignHandler
+	AuthHandler        *handler.AuthHandler
+	UploadHandler      *handler.UploadHandler
+	SupporterHandler   *handler.SupporterHandler
+	FundraiserHandler  *handler.FundraiserHandler
+	CampaignHandler    *handler.CampaignHandler
 	Authenticate       func(http.Handler) http.Handler
 	CORSAllowedOrigins []string
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Application, error) {
-	db, err := repository.Open(ctx, cfg.DatabaseURL)
+	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +100,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return fail(fmt.Errorf("app: initialize queue: %w", err))
 	}
 
-	supporterRepository := repository.NewPostgresSupporterRepository(db)
-	fundraiserRepository := repository.NewPostgresFundraiserRepository(db)
-	campaignRepository := repository.NewPostgresCampaignRepository(db)
-	authRepository := repository.NewPostgresAuthRepository(db)
+	supporterRepository := database.NewPostgresSupporterRepository(db)
+	fundraiserRepository := database.NewPostgresFundraiserRepository(db)
+	campaignRepository := database.NewPostgresCampaignRepository(db)
+	authRepository := database.NewPostgresAuthRepository(db)
 
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
@@ -122,11 +122,11 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	)
 	uploadService := service.NewUploadService(putPresigner, uuid.NewV7)
 
-	supporterHandler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
-	fundraiserHandler := api.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
-	campaignHandler := api.NewCampaignHandler(campaignService, urlBuilder, logger)
-	authHandler := api.NewAuthHandler(authService, urlBuilder, logger)
-	uploadHandler := api.NewUploadHandler(uploadService, logger)
+	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
+	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
+	campaignHandler := handler.NewCampaignHandler(campaignService, urlBuilder, logger)
+	authHandler := handler.NewAuthHandler(authService, urlBuilder, logger)
+	uploadHandler := handler.NewUploadHandler(uploadService, logger)
 
 	return &Application{
 		DB:                 db,

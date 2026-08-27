@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Blankon-Developer/be-pawfund/internal/api"
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
-	"github.com/Blankon-Developer/be-pawfund/internal/httpx"
-	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/middleware"
-	"github.com/Blankon-Developer/be-pawfund/internal/repository"
-	"github.com/Blankon-Developer/be-pawfund/internal/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
+	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
-	"github.com/Blankon-Developer/be-pawfund/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -34,13 +34,13 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create URL builder: %v", err)
 	}
-	repo := repository.NewPostgresSupporterRepository(testDatabase)
+	repo := database.NewPostgresSupporterRepository(testDatabase)
 	supporterService := service.NewSupporterService(repo, uuid.NewV7)
-	handler := api.NewSupporterHandler(supporterService, urlBuilder, logger)
+	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
 	application := &app.Application{
 		DB:               testDatabase,
-		AuthHandler:      api.NewAuthHandler(nil, urlBuilder, logger),
-		SupporterHandler: handler,
+		AuthHandler:      handler.NewAuthHandler(nil, urlBuilder, logger),
+		SupporterHandler: supporterHandler,
 		Authenticate:     appmiddleware.Authenticate(jwtManager, logger),
 	}
 	router := routes.Setup(application, logger)

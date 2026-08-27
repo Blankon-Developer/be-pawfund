@@ -10,12 +10,13 @@ import (
 	"testing"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/google/uuid"
 )
 
 func TestPostgresFundraiserRepositoryCreate(t *testing.T) {
-	repo := repository.NewPostgresFundraiserRepository(testDatabase)
+	repo := database.NewPostgresFundraiserRepository(testDatabase)
 
 	tests := []struct {
 		name          string
@@ -125,7 +126,7 @@ func TestPostgresFundraiserRepositoryFindByWalletAddress(t *testing.T) {
 		{
 			name: "finds fundraiser case-insensitively",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &imageKey))
 			},
 			address:    strings.ToLower(fundraiserWallet),
@@ -136,7 +137,7 @@ func TestPostgresFundraiserRepositoryFindByWalletAddress(t *testing.T) {
 		{
 			name: "returns nullable profile fields",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				fundraiser := newFundraiser("shelter@example.com", fundraiserWallet, nil)
 				fundraiser.SocialURL = nil
 				mustCreateFundraiser(t, repo, fundraiser)
@@ -147,7 +148,7 @@ func TestPostgresFundraiserRepositoryFindByWalletAddress(t *testing.T) {
 		{
 			name: "does not return supporter profile",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresSupporterRepository(testDatabase)
+				repo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateSupporter(t, repo, newSupporter("supporter@example.com", fundraiserWallet, nil))
 			},
 			address: fundraiserWallet,
@@ -166,7 +167,7 @@ func TestPostgresFundraiserRepositoryFindByWalletAddress(t *testing.T) {
 				test.prepare(t)
 			}
 
-			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			repo := database.NewPostgresFundraiserRepository(testDatabase)
 			profile, found, err := repo.FindByWalletAddress(t.Context(), test.address)
 			if err != nil {
 				t.Fatalf("FindByWalletAddress() unexpected error: %v", err)
@@ -214,7 +215,7 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 		{
 			name: "replaces every profile field and clears image",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
 			},
 			walletAddress: strings.ToLower(fundraiserWallet),
@@ -237,8 +238,8 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 		{
 			name: "does not mark shared old image for deletion",
 			prepare: func(t *testing.T) {
-				fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-				supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+				fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+				supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 				mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
 				mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &oldImageObjectKey))
 			},
@@ -258,7 +259,7 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 		{
 			name: "preserves image when replacement omits its key",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
 			},
 			walletAddress: fundraiserWallet,
@@ -281,7 +282,7 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 		{
 			name: "maps duplicate email constraint",
 			prepare: func(t *testing.T) {
-				repo := repository.NewPostgresFundraiserRepository(testDatabase)
+				repo := database.NewPostgresFundraiserRepository(testDatabase)
 				mustCreateFundraiser(t, repo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
 				mustCreateFundraiser(t, repo, newFundraiser("taken@example.com", "0xTaken", nil))
 			},
@@ -299,7 +300,7 @@ func TestPostgresFundraiserRepositoryReplaceProfile(t *testing.T) {
 				test.prepare(t)
 			}
 
-			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			repo := database.NewPostgresFundraiserRepository(testDatabase)
 			result, found, err := repo.ReplaceProfile(t.Context(), test.walletAddress, test.profile)
 			if test.wantError != nil {
 				if !errors.Is(err, test.wantError) {
@@ -377,12 +378,12 @@ func TestPostgresFundraiserRepositoryDeleteProfile(t *testing.T) {
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
 
-			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			repo := database.NewPostgresFundraiserRepository(testDatabase)
 			fundraiser := newFundraiser("rescue@example.com", fundraiserWallet, &imageObjectKey)
 			if test.createProfile {
 				mustCreateFundraiser(t, repo, fundraiser)
 				if test.shareImage {
-					supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+					supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 					mustCreateSupporter(t, supporterRepo, newSupporter("supporter@example.com", "0xSupporter", &imageObjectKey))
 				}
 				if test.activeCampaign {
@@ -436,7 +437,7 @@ func TestPostgresFundraiserRepositoryDeleteProfile(t *testing.T) {
 			if profile, active, err := repo.FindByWalletAddress(t.Context(), fundraiserWallet); err != nil || active {
 				t.Errorf("FindByWalletAddress() after delete = %#v, %v, %v", profile, active, err)
 			}
-			authRepo := repository.NewPostgresAuthRepository(testDatabase)
+			authRepo := database.NewPostgresAuthRepository(testDatabase)
 			if profile, active, err := authRepo.FindProfileByWalletAddress(t.Context(), fundraiserWallet); err != nil || active {
 				t.Errorf("FindProfileByWalletAddress() after delete = %#v, %v, %v", profile, active, err)
 			}
@@ -470,7 +471,7 @@ func TestPostgresFundraiserRepositoryDeleteProfileDeploymentStatuses(t *testing.
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
 			const walletAddress = "0xDeploymentStatusFundraiser"
-			repo := repository.NewPostgresFundraiserRepository(testDatabase)
+			repo := database.NewPostgresFundraiserRepository(testDatabase)
 			fundraiser := newFundraiser("deployment@example.com", walletAddress, nil)
 			mustCreateFundraiser(t, repo, fundraiser)
 			mustCreateCampaignWithDeploymentStatus(t, fundraiser.ID, test.deploymentStatus)
@@ -508,7 +509,7 @@ func newFundraiser(email, wallet string, imageObjectKey *string) domain.Fundrais
 	}
 }
 
-func mustCreateFundraiser(t *testing.T, repo *repository.PostgresFundraiserRepository, fundraiser domain.Fundraiser) {
+func mustCreateFundraiser(t *testing.T, repo *database.PostgresFundraiserRepository, fundraiser domain.Fundraiser) {
 	t.Helper()
 	if _, err := repo.Create(t.Context(), fundraiser); err != nil {
 		t.Fatalf("prepare fundraiser: %v", err)

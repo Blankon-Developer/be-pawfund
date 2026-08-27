@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/google/uuid"
 )
 
 func TestPostgresCampaignRepositoryCreatePending(t *testing.T) {
 	const walletAddress = "0xFundraiserChecksum"
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
 
 	t.Run("creates and replays a pending campaign", func(t *testing.T) {
 		cleanDatabase(t)
@@ -155,8 +156,8 @@ func TestPostgresCampaignRepositoryFindByIDForFundraiser(t *testing.T) {
 		ownerWallet = "0xFundraiserChecksum"
 		otherWallet = "0xOtherFundraiser"
 	)
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
 	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("owner@example.com", ownerWallet, nil))
 	mustCreateFundraiser(t, fundraiserRepo, newFundraiser("other@example.com", otherWallet, nil))
 
@@ -212,8 +213,8 @@ func TestPostgresCampaignRepositoryFindPublicByContractAddress(t *testing.T) {
 	t.Cleanup(func() { cleanDatabase(t) })
 
 	fundraiserImageObjectKey := "profiles/public-fundraiser.png"
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
 	fundraiser := newFundraiser("public@example.com", "0xPublicFundraiser", &fundraiserImageObjectKey)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 
@@ -291,9 +292,9 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 	cleanDatabase(t)
 	t.Cleanup(func() { cleanDatabase(t) })
 
-	fundraiserRepo := repository.NewPostgresFundraiserRepository(testDatabase)
-	campaignRepo := repository.NewPostgresCampaignRepository(testDatabase)
-	supporterRepo := repository.NewPostgresSupporterRepository(testDatabase)
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
+	supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 	fundraiser := newFundraiser("donor-list@example.com", "0xDonorListFundraiser", nil)
 	mustCreateFundraiser(t, fundraiserRepo, fundraiser)
 
