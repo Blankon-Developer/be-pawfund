@@ -2217,9 +2217,14 @@
               "address": { "type": "string" },
               "name": { "type": "string", "nullable": true, "description": "Null when the wallet is not registered." },
               "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"], "nullable": true, "description": "Null when the wallet is not registered." },
-              "imageUrl": { "type": "string", "format": "uri", "nullable": true, "description": "Null when the wallet is not registered or has no profile image." }
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true, "description": "Null when the wallet is not registered or has no profile image." },
+              "chainId": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "EIP-155 chain ID of the blockchain currently configured for the application."
+              }
             },
-            "required": ["accessToken", "isNotRegistered", "address", "name", "role", "imageUrl"]
+            "required": ["accessToken", "isNotRegistered", "address", "name", "role", "imageUrl", "chainId"]
           },
           "errors": { "type": "object", "nullable": true }
         },
@@ -2239,9 +2244,14 @@
               "address": { "type": "string" },
               "name": { "type": "string" },
               "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"] },
-              "imageUrl": { "type": "string", "format": "uri", "nullable": true }
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true },
+              "chainId": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "EIP-155 chain ID of the blockchain currently configured for the application."
+              }
             },
-            "required": ["address", "name", "role", "imageUrl"]
+            "required": ["address", "name", "role", "imageUrl", "chainId"]
           },
           "errors": { "type": "object", "nullable": true }
         },

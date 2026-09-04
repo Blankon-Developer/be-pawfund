@@ -25,15 +25,22 @@ type AuthService interface {
 type AuthHandler struct {
 	service    AuthService
 	urlBuilder *storage.PublicURLBuilder
+	chainID    int
 	httpx.Responder
 }
 
 func NewAuthHandler(
 	service AuthService,
 	urlBuilder *storage.PublicURLBuilder,
+	chainID int,
 	logger *slog.Logger,
 ) *AuthHandler {
-	return &AuthHandler{service: service, urlBuilder: urlBuilder, Responder: httpx.NewResponder(logger)}
+	return &AuthHandler{
+		service:    service,
+		urlBuilder: urlBuilder,
+		chainID:    chainID,
+		Responder:  httpx.NewResponder(logger),
+	}
 }
 
 func (h *AuthHandler) HandleCreateMessage(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +119,7 @@ func (h *AuthHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		AccessToken:     result.AccessToken,
 		IsNotRegistered: result.Profile == nil,
 		Address:         result.Address,
+		ChainID:         h.chainID,
 	}
 	if result.Profile != nil {
 		response.Name = &result.Profile.Name
@@ -162,6 +170,7 @@ func (h *AuthHandler) HandleGetMe(w http.ResponseWriter, r *http.Request) {
 		Name:     profile.Name,
 		Role:     profile.Role,
 		ImageURL: h.urlBuilder.Build(profile.ImageObjectKey),
+		ChainID:  h.chainID,
 	}
 	h.Success(w, http.StatusOK, "PROFILE_RETRIEVED", "Profile retrieved successfully.", response)
 }

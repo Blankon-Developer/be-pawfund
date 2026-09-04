@@ -165,6 +165,7 @@ func TestAuthEndpoints(t *testing.T) {
 				Name            *string          `json:"name"`
 				Role            *domain.UserRole `json:"role"`
 				ImageURL        *string          `json:"imageUrl"`
+				ChainID         int              `json:"chainId"`
 			}
 			if err := json.Unmarshal(verified.Data, &data); err != nil {
 				t.Fatalf("decode verify data: %v", err)
@@ -174,6 +175,9 @@ func TestAuthEndpoints(t *testing.T) {
 			}
 			if !equalStringPointers(data.Name, test.wantName) || !equalRoles(data.Role, test.wantRole) || !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("profile = name:%v role:%v image:%v", data.Name, data.Role, data.ImageURL)
+			}
+			if data.ChainID != 84532 {
+				t.Errorf("chain ID = %d, want 84532", data.ChainID)
 			}
 			principal, err := jwtManager.Verify(data.AccessToken)
 			if err != nil {
@@ -299,6 +303,7 @@ func TestGetMeEndpoint(t *testing.T) {
 				Name     string          `json:"name"`
 				Role     domain.UserRole `json:"role"`
 				ImageURL *string         `json:"imageUrl"`
+				ChainID  int             `json:"chainId"`
 			}
 			if err := json.Unmarshal(result.Data, &data); err != nil {
 				t.Fatalf("decode get me data: %v", err)
@@ -308,6 +313,9 @@ func TestGetMeEndpoint(t *testing.T) {
 			}
 			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
+			}
+			if data.ChainID != 84532 {
+				t.Errorf("chain ID = %d, want 84532", data.ChainID)
 			}
 		})
 	}

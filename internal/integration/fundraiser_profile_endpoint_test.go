@@ -545,7 +545,7 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
 	application := &app.Application{
 		DB:                testDatabase,
-		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, logger),
+		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
 		SupporterHandler:  handler.NewSupporterHandler(nil, urlBuilder, logger),
 		FundraiserHandler: handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger),
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),

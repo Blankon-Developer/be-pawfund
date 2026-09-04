@@ -125,7 +125,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
 	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
 	campaignHandler := handler.NewCampaignHandler(campaignService, urlBuilder, logger)
-	authHandler := handler.NewAuthHandler(authService, urlBuilder, logger)
+	authHandler := handler.NewAuthHandler(authService, urlBuilder, cfg.SIWEChainID, logger)
 	uploadHandler := handler.NewUploadHandler(uploadService, logger)
 
 	return &Application{

@@ -39,7 +39,7 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
 	application := &app.Application{
 		DB:               testDatabase,
-		AuthHandler:      handler.NewAuthHandler(nil, urlBuilder, logger),
+		AuthHandler:      handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
 		SupporterHandler: supporterHandler,
 		Authenticate:     appmiddleware.Authenticate(jwtManager, logger),
 	}

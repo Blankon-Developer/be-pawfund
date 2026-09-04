@@ -40,7 +40,7 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
 	application := &app.Application{
 		DB:                testDatabase,
-		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, logger),
+		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
 		SupporterHandler:  handler.NewSupporterHandler(nil, urlBuilder, logger),
 		FundraiserHandler: fundraiserHandler,
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),

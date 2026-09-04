@@ -18,6 +18,8 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 )
 
+const testAuthChainID = 11155111
+
 type authServiceStub struct {
 	message           string
 	createErr         error
@@ -306,6 +308,9 @@ func TestAuthHandlerHandleVerify(t *testing.T) {
 				if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 					t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
 				}
+				if data.ChainID != testAuthChainID {
+					t.Errorf("chain ID = %d, want %d", data.ChainID, testAuthChainID)
+				}
 				if test.wantIsNotRegistered && (data.Name != nil || data.Role != nil || data.ImageURL != nil) {
 					t.Errorf("unregistered profile fields = %#v", data)
 				}
@@ -439,6 +444,9 @@ func TestAuthHandlerHandleGetMe(t *testing.T) {
 			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
 			}
+			if data.ChainID != testAuthChainID {
+				t.Errorf("chain ID = %d, want %d", data.ChainID, testAuthChainID)
+			}
 			if strings.Contains(string(decoded.Data), "ImageObjectKey") || strings.Contains(string(decoded.Data), "imageObjectKey") {
 				t.Errorf("response leaks image object key: %s", decoded.Data)
 			}
@@ -468,7 +476,7 @@ func newTestAuthHandler(t *testing.T, service AuthService) *AuthHandler {
 		t.Fatalf("create URL builder: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewAuthHandler(service, urlBuilder, logger)
+	return NewAuthHandler(service, urlBuilder, testAuthChainID, logger)
 }
 
 func authFieldErrorsEqual(left, right httpx.FieldErrors) bool {
