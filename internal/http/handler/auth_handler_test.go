@@ -322,17 +322,18 @@ func TestAuthHandlerHandleVerify(t *testing.T) {
 func TestAuthHandlerHandleGetMe(t *testing.T) {
 	imageKey := "profiles/cat photo.png"
 	tests := []struct {
-		name             string
-		principal        *auth.Principal
-		profile          domain.AuthProfile
-		serviceErr       error
-		wantHTTP         int
-		wantCode         string
-		wantServiceCalls int
-		wantAddress      string
-		wantName         string
-		wantRole         domain.UserRole
-		wantImageURL     *string
+		name                string
+		principal           *auth.Principal
+		profile             domain.AuthProfile
+		serviceErr          error
+		wantHTTP            int
+		wantCode            string
+		wantServiceCalls    int
+		wantAddress         string
+		wantIsNotRegistered bool
+		wantName            *string
+		wantRole            *domain.UserRole
+		wantImageURL        *string
 	}{
 		{
 			name:      "returns authenticated supporter profile",
@@ -346,8 +347,8 @@ func TestAuthHandlerHandleGetMe(t *testing.T) {
 			wantCode:         "PROFILE_RETRIEVED",
 			wantServiceCalls: 1,
 			wantAddress:      "0x1234567890123456789012345678901234567890",
-			wantName:         "Cat Lover",
-			wantRole:         domain.UserRoleSupporter,
+			wantName:         stringPointer("Cat Lover"),
+			wantRole:         rolePointer(domain.UserRoleSupporter),
 			wantImageURL:     stringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
 		},
 		{
@@ -361,8 +362,8 @@ func TestAuthHandlerHandleGetMe(t *testing.T) {
 			wantCode:         "PROFILE_RETRIEVED",
 			wantServiceCalls: 1,
 			wantAddress:      "0x2234567890123456789012345678901234567890",
-			wantName:         "Paw Rescue",
-			wantRole:         domain.UserRoleFundraiser,
+			wantName:         stringPointer("Paw Rescue"),
+			wantRole:         rolePointer(domain.UserRoleFundraiser),
 		},
 		{
 			name:     "requires authenticated principal",
@@ -376,13 +377,14 @@ func TestAuthHandlerHandleGetMe(t *testing.T) {
 			wantCode:  "INVALID_ACCESS_TOKEN",
 		},
 		{
-			name:             "maps missing profile",
-			principal:        &auth.Principal{WalletAddress: "0x3234567890123456789012345678901234567890"},
-			serviceErr:       service.ErrProfileNotFound,
-			wantHTTP:         http.StatusNotFound,
-			wantCode:         "PROFILE_NOT_FOUND",
-			wantServiceCalls: 1,
-			wantAddress:      "0x3234567890123456789012345678901234567890",
+			name:                "returns unregistered identity when profile is missing",
+			principal:           &auth.Principal{WalletAddress: "0x3234567890123456789012345678901234567890"},
+			serviceErr:          service.ErrProfileNotFound,
+			wantHTTP:            http.StatusOK,
+			wantCode:            "PROFILE_RETRIEVED",
+			wantServiceCalls:    1,
+			wantAddress:         "0x3234567890123456789012345678901234567890",
+			wantIsNotRegistered: true,
 		},
 		{
 			name:             "maps internal failure",
@@ -438,14 +440,20 @@ func TestAuthHandlerHandleGetMe(t *testing.T) {
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode get me data: %v", err)
 			}
-			if data.Address != test.wantAddress || data.Name != test.wantName || data.Role != test.wantRole {
+			if data.IsNotRegistered != test.wantIsNotRegistered || data.Address != test.wantAddress {
 				t.Errorf("profile identity = %#v", data)
+			}
+			if !equalStringPointers(data.Name, test.wantName) || !equalRoles(data.Role, test.wantRole) {
+				t.Errorf("profile fields = name:%v role:%v", data.Name, data.Role)
 			}
 			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
 			}
 			if data.ChainID != testAuthChainID {
 				t.Errorf("chain ID = %d, want %d", data.ChainID, testAuthChainID)
+			}
+			if test.wantIsNotRegistered && (data.Name != nil || data.Role != nil || data.ImageURL != nil) {
+				t.Errorf("unregistered profile fields = %#v", data)
 			}
 			if strings.Contains(string(decoded.Data), "ImageObjectKey") || strings.Contains(string(decoded.Data), "imageObjectKey") {
 				t.Errorf("response leaks image object key: %s", decoded.Data)
@@ -483,4 +491,15 @@ func authFieldErrorsEqual(left, right httpx.FieldErrors) bool {
 	leftJSON, _ := json.Marshal(left)
 	rightJSON, _ := json.Marshal(right)
 	return string(leftJSON) == string(rightJSON)
+}
+
+func rolePointer(value domain.UserRole) *domain.UserRole {
+	return &value
+}
+
+func equalRoles(left, right *domain.UserRole) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }

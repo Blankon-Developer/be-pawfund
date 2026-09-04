@@ -149,26 +149,30 @@ func (h *AuthHandler) HandleGetMe(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.service.GetMe(r.Context(), walletAddress)
 	if err != nil {
-		if errors.Is(err, service.ErrProfileNotFound) {
-			h.Error(
-				w,
-				http.StatusNotFound,
-				"PROFILE_NOT_FOUND",
-				"No profile is registered for the authenticated wallet.",
-				nil,
-			)
+		if !errors.Is(err, service.ErrProfileNotFound) {
+			h.Logger.Error("get authenticated profile", "error", err)
+			h.InternalError(w)
 			return
 		}
 
-		h.Logger.Error("get authenticated profile", "error", err)
-		h.InternalError(w)
+		h.Success(
+			w,
+			http.StatusOK,
+			"PROFILE_RETRIEVED",
+			"Profile retrieved successfully.",
+			getMeResponse{
+				IsNotRegistered: true,
+				Address:         walletAddress,
+				ChainID:         h.chainID,
+			},
+		)
 		return
 	}
 
 	response := getMeResponse{
 		Address:  walletAddress,
-		Name:     profile.Name,
-		Role:     profile.Role,
+		Name:     &profile.Name,
+		Role:     &profile.Role,
 		ImageURL: h.urlBuilder.Build(profile.ImageObjectKey),
 		ChainID:  h.chainID,
 	}

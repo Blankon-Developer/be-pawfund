@@ -312,7 +312,7 @@
         "security": [{ "BearerAuth": [] }],
         "responses": {
           "200": {
-            "description": "Authenticated profile retrieved successfully.",
+            "description": "Authenticated wallet identity retrieved successfully. When the wallet has no supporter or fundraiser profile, isNotRegistered is true and name, role, and imageUrl are null.",
             "headers": {
               "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
               "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
@@ -333,18 +333,6 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/AuthAccessTokenError" }
-              }
-            }
-          },
-          "404": {
-            "description": "No profile is registered for the authenticated wallet.",
-            "headers": {
-              "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" },
-              "Vary": { "$ref": "#/components/headers/AuthorizationVary" }
-            },
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/AuthProfileNotFoundError" }
               }
             }
           },
@@ -2130,18 +2118,6 @@
           }
         ]
       },
-      "AuthProfileNotFoundError": {
-        "allOf": [
-          { "$ref": "#/components/schemas/AuthErrorResponse" },
-          {
-            "type": "object",
-            "properties": {
-              "code": { "type": "string", "enum": ["PROFILE_NOT_FOUND"] },
-              "message": { "type": "string", "default": "No profile is registered for the authenticated wallet." }
-            }
-          }
-        ]
-      },
       "AuthMessageValidationError": {
         "allOf": [
           { "$ref": "#/components/schemas/AuthErrorResponse" },
@@ -2241,17 +2217,18 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+              "isNotRegistered": { "type": "boolean", "description": "True when the authenticated wallet has no supporter or fundraiser profile." },
               "address": { "type": "string" },
-              "name": { "type": "string" },
-              "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"] },
-              "imageUrl": { "type": "string", "format": "uri", "nullable": true },
+              "name": { "type": "string", "nullable": true, "description": "Null when the wallet is not registered." },
+              "role": { "type": "string", "enum": ["SUPPORTER", "FUNDRAISER"], "nullable": true, "description": "Null when the wallet is not registered." },
+              "imageUrl": { "type": "string", "format": "uri", "nullable": true, "description": "Null when the wallet is not registered or has no profile image." },
               "chainId": {
                 "type": "integer",
                 "minimum": 1,
                 "description": "EIP-155 chain ID of the blockchain currently configured for the application."
               }
             },
-            "required": ["address", "name", "role", "imageUrl", "chainId"]
+            "required": ["isNotRegistered", "address", "name", "role", "imageUrl", "chainId"]
           },
           "errors": { "type": "object", "nullable": true }
         },

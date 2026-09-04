@@ -200,14 +200,15 @@ func TestAuthEndpoints(t *testing.T) {
 func TestGetMeEndpoint(t *testing.T) {
 	imageKey := "profiles/cat photo.png"
 	tests := []struct {
-		name          string
-		prepare       func(t *testing.T, walletAddress string)
-		authorization string
-		wantHTTP      int
-		wantCode      string
-		wantName      string
-		wantRole      domain.UserRole
-		wantImageURL  *string
+		name                string
+		prepare             func(t *testing.T, walletAddress string)
+		authorization       string
+		wantHTTP            int
+		wantCode            string
+		wantIsNotRegistered bool
+		wantName            *string
+		wantRole            *domain.UserRole
+		wantImageURL        *string
 	}{
 		{
 			name: "returns supporter profile",
@@ -220,8 +221,8 @@ func TestGetMeEndpoint(t *testing.T) {
 			authorization: "valid",
 			wantHTTP:      http.StatusOK,
 			wantCode:      "PROFILE_RETRIEVED",
-			wantName:      "Cat Lover",
-			wantRole:      domain.UserRoleSupporter,
+			wantName:      integrationStringPointer("Cat Lover"),
+			wantRole:      integrationRolePointer(domain.UserRoleSupporter),
 			wantImageURL:  integrationStringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
 		},
 		{
@@ -232,14 +233,15 @@ func TestGetMeEndpoint(t *testing.T) {
 			authorization: "valid",
 			wantHTTP:      http.StatusOK,
 			wantCode:      "PROFILE_RETRIEVED",
-			wantName:      "Paw Rescue",
-			wantRole:      domain.UserRoleFundraiser,
+			wantName:      integrationStringPointer("Paw Rescue"),
+			wantRole:      integrationRolePointer(domain.UserRoleFundraiser),
 		},
 		{
-			name:          "returns not found for unregistered wallet",
-			authorization: "valid",
-			wantHTTP:      http.StatusNotFound,
-			wantCode:      "PROFILE_NOT_FOUND",
+			name:                "returns unregistered identity for unknown wallet",
+			authorization:       "valid",
+			wantHTTP:            http.StatusOK,
+			wantCode:            "PROFILE_RETRIEVED",
+			wantIsNotRegistered: true,
 		},
 		{
 			name:     "requires access token",
@@ -299,23 +301,30 @@ func TestGetMeEndpoint(t *testing.T) {
 			}
 
 			var data struct {
-				Address  string          `json:"address"`
-				Name     string          `json:"name"`
-				Role     domain.UserRole `json:"role"`
-				ImageURL *string         `json:"imageUrl"`
-				ChainID  int             `json:"chainId"`
+				IsNotRegistered bool             `json:"isNotRegistered"`
+				Address         string           `json:"address"`
+				Name            *string          `json:"name"`
+				Role            *domain.UserRole `json:"role"`
+				ImageURL        *string          `json:"imageUrl"`
+				ChainID         int              `json:"chainId"`
 			}
 			if err := json.Unmarshal(result.Data, &data); err != nil {
 				t.Fatalf("decode get me data: %v", err)
 			}
-			if data.Address != walletAddress || data.Name != test.wantName || data.Role != test.wantRole {
+			if data.IsNotRegistered != test.wantIsNotRegistered || data.Address != walletAddress {
 				t.Errorf("profile identity = %#v", data)
+			}
+			if !equalStringPointers(data.Name, test.wantName) || !equalRoles(data.Role, test.wantRole) {
+				t.Errorf("profile fields = name:%v role:%v", data.Name, data.Role)
 			}
 			if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 				t.Errorf("image URL = %v, want %v", data.ImageURL, test.wantImageURL)
 			}
 			if data.ChainID != 84532 {
 				t.Errorf("chain ID = %d, want 84532", data.ChainID)
+			}
+			if test.wantIsNotRegistered && (data.Name != nil || data.Role != nil || data.ImageURL != nil) {
+				t.Errorf("unregistered profile fields = %#v", data)
 			}
 		})
 	}
