@@ -20,7 +20,7 @@ func TestCreateCampaignRequestNormalizeAndValidate(t *testing.T) {
 		Story:            " A long rescue story. ",
 		GoalAmount:       10_000_000_000,
 		EndAt:            " 2030-08-10T12:00:00+07:00 ",
-		ImageObjectKey:   " campaigns/rescue.png ",
+		ImageObjectKey:   " tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp ",
 		Country:          " Indonesia ",
 		ZipCode:          " 10110 ",
 	}
@@ -33,7 +33,7 @@ func TestCreateCampaignRequestNormalizeAndValidate(t *testing.T) {
 	if request.Title != "Emergency Rescue" || request.ShortDescription != "Help rescued animals" || request.Story != "A long rescue story." {
 		t.Errorf("normalized content = %#v", request)
 	}
-	if request.ImageObjectKey != "campaigns/rescue.png" || request.Country != "Indonesia" || request.ZipCode != "10110" {
+	if request.ImageObjectKey != "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp" || request.Country != "Indonesia" || request.ZipCode != "10110" {
 		t.Errorf("normalized metadata = %#v", request)
 	}
 	wantEndAt := time.Date(2030, 8, 10, 5, 0, 0, 0, time.UTC)
@@ -49,7 +49,7 @@ func TestCreateCampaignRequestValidate(t *testing.T) {
 		Story:            "A long rescue story.",
 		GoalAmount:       10_000_000_000,
 		EndAt:            "2030-08-10T05:00:00Z",
-		ImageObjectKey:   "campaigns/rescue.png",
+		ImageObjectKey:   "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp",
 		Country:          "Indonesia",
 		ZipCode:          "10110",
 	}
@@ -59,6 +59,17 @@ func TestCreateCampaignRequestValidate(t *testing.T) {
 		wantErrors httpx.FieldErrors
 	}{
 		{name: "accepts a valid request", request: valid},
+		{
+			name: "rejects a canonical campaign image key",
+			request: func() createCampaignRequest {
+				request := valid
+				request.ImageObjectKey = "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+				return request
+			}(),
+			wantErrors: httpx.FieldErrors{
+				"imageObjectKey": {"imageObjectKey must be a staged campaign image key!"},
+			},
+		},
 		{
 			name:    "returns every required field error",
 			request: createCampaignRequest{},

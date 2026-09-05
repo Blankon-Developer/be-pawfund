@@ -52,14 +52,14 @@ func (s *UploadService) PresignProfileImage(
 	ctx context.Context,
 	input PresignProfileImageInput,
 ) (PresignProfileImageResult, error) {
-	return s.presignImage(ctx, input, "profiles", "profile")
+	return s.presignImage(ctx, input, ProfileImageDirectory, "profile")
 }
 
 func (s *UploadService) PresignCampaignImage(
 	ctx context.Context,
 	input PresignCampaignImageInput,
 ) (PresignCampaignImageResult, error) {
-	return s.presignImage(ctx, input, "campaigns", "campaign")
+	return s.presignImage(ctx, input, CampaignImageDirectory, "campaign")
 }
 
 func (s *UploadService) presignImage(
@@ -81,24 +81,11 @@ func (s *UploadService) presignImage(
 	if err != nil {
 		return PresignProfileImageResult{}, fmt.Errorf("service: generate %s image ID: %w", imageKind, err)
 	}
-	objectKey := directory + "/" + id.String() + extension
+	objectKey := stagingImageObjectKey(directory, id.String(), extension)
 	presignedURL, err := s.presigner.PresignPut(ctx, objectKey, contentType, input.Size)
 	if err != nil {
 		return PresignProfileImageResult{}, fmt.Errorf("service: presign %s image upload: %w", imageKind, err)
 	}
 
 	return PresignProfileImageResult{ObjectKey: objectKey, URL: presignedURL}, nil
-}
-
-func profileImageExtension(contentType string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(contentType)) {
-	case "image/jpeg":
-		return ".jpg", nil
-	case "image/png":
-		return ".png", nil
-	case "image/webp":
-		return ".webp", nil
-	default:
-		return "", ErrUnsupportedProfileImageType
-	}
 }

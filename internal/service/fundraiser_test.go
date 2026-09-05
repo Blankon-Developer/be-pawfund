@@ -76,7 +76,7 @@ func TestFundraiserServiceRegister(t *testing.T) {
 	fixedTime := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.UTC)
 	idFailure := errors.New("ID failure")
 	repositoryFailure := errors.New("repository failure")
-	imageKey := " profiles/rescue.png "
+	imageKey := " tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg "
 
 	tests := []struct {
 		name               string
@@ -90,7 +90,7 @@ func TestFundraiserServiceRegister(t *testing.T) {
 		{
 			name:               "creates normalized fundraiser",
 			imageObjectKey:     &imageKey,
-			wantImageObjectKey: serviceStringPointer("profiles/rescue.png"),
+			wantImageObjectKey: serviceStringPointer("profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
 			wantRepositoryCall: true,
 		},
 		{
@@ -163,7 +163,7 @@ func TestFundraiserServiceRegister(t *testing.T) {
 				}
 				return fixedID, nil
 			}
-			fundraiserService := NewFundraiserService(repo, generator)
+			fundraiserService := NewFundraiserService(repo, generator, nil, nil)
 
 			created, err := fundraiserService.Register(ctx, RegisterFundraiserInput{
 				Name:          " Animal Rescue ",
@@ -254,7 +254,7 @@ func TestFundraiserServiceGetProfile(t *testing.T) {
 					return profile, test.found, test.repoError
 				},
 			}
-			fundraiserService := NewFundraiserService(repo, nil)
+			fundraiserService := NewFundraiserService(repo, nil, nil, nil)
 
 			got, err := fundraiserService.GetProfile(ctx, " 0xWalletChecksum ")
 			if test.wantError != nil {
@@ -352,13 +352,13 @@ func TestFundraiserServiceReplaceProfile(t *testing.T) {
 					if profile.Name != "Animal Rescue" || profile.Email != "rescue@example.com" || profile.ContactName != "Jane Doe" || profile.ContactPhone != "+62 812 3456" || profile.SocialURL != "https://example.com/rescue" || profile.Country != "Indonesia" || profile.ZipCode != "10110" {
 						t.Errorf("normalized replacement = %#v", profile)
 					}
-					if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/new.png" {
+					if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/0198a123-4567-7abc-8123-456789abcdef.png" {
 						t.Errorf("image replacement = %#v", profile)
 					}
 					return test.replaceResult, test.found, test.repositoryError
 				},
 			}
-			fundraiserService := NewFundraiserService(repo, nil, deleter)
+			fundraiserService := NewFundraiserService(repo, nil, deleter, nil)
 			err := fundraiserService.ReplaceProfile(ctx, ReplaceFundraiserProfileInput{
 				WalletAddress: " 0xWalletChecksum ",
 				Profile: domain.FundraiserProfileReplacement{
@@ -371,7 +371,7 @@ func TestFundraiserServiceReplaceProfile(t *testing.T) {
 					ZipCode:      " 10110 ",
 					ImageObjectKey: domain.ImageObjectKeyUpdate{
 						Set:   true,
-						Value: serviceStringPointer(" profiles/new.png "),
+						Value: serviceStringPointer(" tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.png "),
 					},
 				},
 			})
@@ -453,7 +453,7 @@ func TestFundraiserServiceDeleteProfile(t *testing.T) {
 					return test.deleteResult, test.found, test.repositoryError
 				},
 			}
-			fundraiserService := NewFundraiserService(repo, nil, deleter)
+			fundraiserService := NewFundraiserService(repo, nil, deleter, nil)
 			err := fundraiserService.DeleteProfile(ctx, " 0xWalletChecksum ")
 
 			if test.wantError != nil {

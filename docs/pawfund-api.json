@@ -29,7 +29,7 @@
     },
     {
       "name": "File Uploads",
-      "description": "Generate presigned URLs for uploading images to storage."
+      "description": "Generate presigned URLs for uploading images to a staging prefix (tmp/profiles or tmp/campaigns). Commit endpoints copy the object to profiles/ or campaigns/ after the related action succeeds."
     }
   ],
   "paths": {
@@ -287,7 +287,7 @@
                   "socialUrl": { "type": "string" },
                   "country": { "type": "string" },
                   "zipCode": { "type": "string" },
-                  "imageObjectKey": { "type": "string" }
+                  "imageObjectKey": { "type": "string", "description": "Staged upload key returned by POST /uploads/profile-image/presign, for example tmp/profiles/{uuid}.jpg." }
                 },
                 "required": [
                   "name",
@@ -449,7 +449,7 @@
                 "description": "Send the complete fundraiser profile. imageObjectKey is optional: omit it to keep the current image, set it to null to remove the image, or send a new object key to replace it.",
                 "properties": {
                   "name": { "type": "string", "description": "Fundraiser name; must not be empty." },
-                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Profile image object key. Use null to remove the current image." },
+                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Staged profile image key from POST /uploads/profile-image/presign (tmp/profiles/{uuid}.ext). Omit to keep the current image, or set null to remove it." },
                   "email": { "type": "string", "format": "email", "description": "Email address; must not be empty." },
                   "contactPerson": {
                     "type": "object",
@@ -673,7 +673,7 @@
                   "story": { "type": "string" },
                   "goalAmount": { "type": "integer", "format": "int64", "minimum": 1, "description": "Atomic USDC units (6 decimals)." },
                   "endAt": { "type": "string", "format": "date-time", "description": "Must be at least five minutes in the future." },
-                  "imageObjectKey": { "type": "string", "maxLength": 1024 },
+                  "imageObjectKey": { "type": "string", "maxLength": 1024, "description": "Staged campaign image key from POST /uploads/campaign-image/presign, for example tmp/campaigns/{uuid}.webp." },
                   "country": { "type": "string", "maxLength": 255 },
                   "zipCode": { "type": "string", "maxLength": 20 }
                 },
@@ -1238,7 +1238,7 @@
                 "description": "Send the complete supporter profile. imageObjectKey is optional: omit it to keep the current image, set it to null to remove the image, or send a new object key to replace it.",
                 "properties": {
                   "name": { "type": "string", "description": "Supporter name; must not be empty." },
-                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Profile image object key. Use null to remove the current image." },
+                  "imageObjectKey": { "type": "string", "nullable": true, "description": "Staged profile image key from POST /uploads/profile-image/presign (tmp/profiles/{uuid}.ext). Omit to keep the current image, or set null to remove it." },
                   "email": { "type": "string", "format": "email", "description": "Email address; must not be empty." }
                 },
                 "required": ["name", "email"]
@@ -1415,7 +1415,7 @@
       "post": {
         "tags": ["File Uploads"],
         "summary": "Presign Campaign Image Upload",
-        "description": "Generate a presigned URL for a registered fundraiser to upload a campaign image. The resulting object key uses the campaigns/ namespace.",
+        "description": "Generate a presigned URL for a registered fundraiser to upload a campaign image. The resulting object key uses the tmp/campaigns/ staging namespace. Pass that key as imageObjectKey when creating the campaign; the API promotes it to campaigns/ on success.",
         "responses": {
           "200": {
             "description": "Campaign image upload presigned successfully.",
@@ -1430,7 +1430,7 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "objectKey": { "type": "string", "default": "campaigns/0198a123-4567-7abc-8123-456789abcdef.jpg" },
+                        "objectKey": { "type": "string", "default": "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.jpg" },
                         "url": { "type": "string" }
                       },
                       "required": ["objectKey", "url"]
@@ -1476,7 +1476,7 @@
       "post": {
         "tags": ["File Uploads"],
         "summary": "Presign Profile Image Upload",
-        "description": "Generate a presigned URL to upload a profile image for a fundraiser or supporter account. Available to any authenticated wallet, including wallets that have not registered a profile yet. Replaces the previous per-role presign endpoints (/fundraiser/profile/presign, /supporter/presign, /register/presign).",
+        "description": "Generate a presigned URL to upload a profile image for a fundraiser or supporter account. Available to any authenticated wallet, including wallets that have not registered a profile yet. The resulting object key uses the tmp/profiles/ staging namespace. Pass that key as imageObjectKey on register or profile update; the API promotes it to profiles/ on success. Replaces the previous per-role presign endpoints (/fundraiser/profile/presign, /supporter/presign, /register/presign).",
         "responses": {
           "200": {
             "description": "Success",
@@ -1498,7 +1498,7 @@
                       "properties": {
                         "objectKey": {
                           "type": "string",
-                          "default": "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+                          "default": "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
                         },
                         "url": { "type": "string" }
                       },
@@ -1785,7 +1785,7 @@
                 "properties": {
                   "name": { "type": "string", "default": "John Doe" },
                   "email": { "type": "string", "default": "john@gmail.com" },
-                  "imageObjectKey": { "type": "string" }
+                  "imageObjectKey": { "type": "string", "description": "Staged upload key returned by POST /uploads/profile-image/presign, for example tmp/profiles/{uuid}.jpg." }
                 },
                 "required": ["name", "email"]
               },

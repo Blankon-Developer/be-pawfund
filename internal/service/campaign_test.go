@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/google/uuid"
 )
@@ -161,7 +162,7 @@ func TestCampaignServiceCreate(t *testing.T) {
 					return uuid.Nil, test.idError
 				}
 				return fixedID, nil
-			})
+			}, nil)
 			campaignService.now = func() time.Time { return fixedNow }
 
 			created, err := campaignService.Create(t.Context(), CreateCampaignInput{
@@ -172,7 +173,7 @@ func TestCampaignServiceCreate(t *testing.T) {
 				Story:            " A long rescue story. ",
 				GoalAmount:       10_000_000_000,
 				EndAt:            fixedNow.Add(30 * 24 * time.Hour),
-				ImageObjectKey:   " campaigns/rescue.png ",
+				ImageObjectKey:   " tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp ",
 				Country:          " Indonesia ",
 				ZipCode:          " 10110 ",
 			})
@@ -196,7 +197,7 @@ func TestCampaignServiceCreate(t *testing.T) {
 			if repo.wallet != "0xFundraiser" || repo.campaign.IdempotencyKey != "create-rescue-1" {
 				t.Errorf("repository identity = %q/%q", repo.wallet, repo.campaign.IdempotencyKey)
 			}
-			if repo.campaign.ID != fixedID || repo.campaign.Title != "Emergency Rescue" || repo.campaign.ImageObjectKey != "campaigns/rescue.png" {
+			if repo.campaign.ID != fixedID || repo.campaign.Title != "Emergency Rescue" || repo.campaign.ImageObjectKey != "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp" {
 				t.Errorf("repository campaign = %#v", repo.campaign)
 			}
 			if repo.campaign.Status != domain.CampaignStatusActive || repo.campaign.DeploymentStatus != domain.CampaignDeploymentStatusPending {
@@ -207,6 +208,98 @@ func TestCampaignServiceCreate(t *testing.T) {
 			}
 			if test.wantError == nil && created.ID != fixedID {
 				t.Errorf("created campaign = %#v", created)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceCreateImageObjectKey(t *testing.T) {
+	fixedNow := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	fixedID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	stagingKey := "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+	canonicalKey := "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+
+	tests := []struct {
+		name               string
+		imageObjectKey     string
+		promoteError       error
+		repositoryError    error
+		wantError          error
+		wantPromote        bool
+		wantDiscard        bool
+		wantRepositoryCall bool
+	}{
+		{
+			name:               "promotes staged campaign image before persist then discards staging",
+			imageObjectKey:     stagingKey,
+			wantPromote:        true,
+			wantDiscard:        true,
+			wantRepositoryCall: true,
+		},
+		{
+			name:           "rejects canonical campaign key",
+			imageObjectKey: "campaigns/rescue.png",
+			wantError:      ErrInvalidImageObjectKey,
+		},
+		{
+			name:           "maps missing staged object",
+			imageObjectKey: stagingKey,
+			promoteError:   storage.ErrObjectNotFound,
+			wantError:      ErrImageObjectNotFound,
+			wantPromote:    true,
+		},
+		{
+			name:               "keeps staging object when persist fails",
+			imageObjectKey:     stagingKey,
+			repositoryError:    repository.ErrCampaignEndAtTooSoon,
+			wantError:          ErrCampaignEndAtTooSoon,
+			wantPromote:        true,
+			wantRepositoryCall: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			promoter := &stubObjectPromoter{err: test.promoteError}
+			repo := &campaignRepositoryStub{err: test.repositoryError}
+			campaignService := NewCampaignService(repo, func() (uuid.UUID, error) {
+				return fixedID, nil
+			}, promoter)
+			campaignService.now = func() time.Time { return fixedNow }
+
+			_, err := campaignService.Create(t.Context(), CreateCampaignInput{
+				WalletAddress:    "0xFundraiser",
+				IdempotencyKey:   "create-rescue-1",
+				Title:            "Emergency Rescue",
+				ShortDescription: "Help rescued animals",
+				Story:            "A long rescue story.",
+				GoalAmount:       1,
+				EndAt:            fixedNow.Add(24 * time.Hour),
+				ImageObjectKey:   test.imageObjectKey,
+				Country:          "Indonesia",
+				ZipCode:          "10110",
+			})
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("Create() error = %v, want %v", err, test.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("Create() unexpected error: %v", err)
+			}
+			if (promoter.calls > 0) != test.wantPromote {
+				t.Errorf("promoter calls = %d, want called = %v", promoter.calls, test.wantPromote)
+			}
+			if (repo.calls > 0) != test.wantRepositoryCall {
+				t.Errorf("repository calls = %d, want called = %v", repo.calls, test.wantRepositoryCall)
+			}
+			if (promoter.discardCalls > 0) != test.wantDiscard {
+				t.Errorf("discard calls = %d, want called = %v", promoter.discardCalls, test.wantDiscard)
+			}
+			if test.wantDiscard && promoter.discardedKey != stagingKey {
+				t.Errorf("discarded key = %q, want %q", promoter.discardedKey, stagingKey)
+			}
+			if test.wantRepositoryCall && repo.campaign.ImageObjectKey != canonicalKey {
+				t.Errorf("persisted key = %q, want %q", repo.campaign.ImageObjectKey, canonicalKey)
 			}
 		})
 	}
@@ -232,7 +325,7 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 				listTotal: 47,
 				listErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil)
+			campaignService := NewCampaignService(repo, nil, nil)
 			options := domain.CampaignListOptions{
 				Search:   " rescue ",
 				Sort:     domain.CampaignListSortMostDonated,
@@ -282,7 +375,7 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 				publicListTotal: 47,
 				publicListErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil)
+			campaignService := NewCampaignService(repo, nil, nil)
 			options := domain.CampaignListOptions{
 				Search:   " rescue ",
 				Sort:     domain.CampaignListSortRandom,
@@ -331,7 +424,7 @@ func TestCampaignServiceGetPublicCampaignDetail(t *testing.T) {
 				publicRetrieved: domain.PublicCampaignDetail{Campaign: domain.Campaign{Title: "Emergency Rescue"}},
 				publicFindErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil)
+			campaignService := NewCampaignService(repo, nil, nil)
 
 			campaign, err := campaignService.GetPublicCampaignDetail(t.Context(), " 0xCaMpAiGn ")
 
@@ -375,7 +468,7 @@ func TestCampaignServiceListPublicCampaignDonors(t *testing.T) {
 				publicDonorsTotal: 47,
 				publicDonorsErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil)
+			campaignService := NewCampaignService(repo, nil, nil)
 			options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 25}
 
 			donors, total, err := campaignService.ListPublicCampaignDonors(t.Context(), " 0xCaMpAiGn ", options)
@@ -420,7 +513,7 @@ func TestCampaignServiceGetMyCampaignDetail(t *testing.T) {
 				retrieved: domain.Campaign{ID: campaignID, Title: "Emergency Rescue"},
 				findErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil)
+			campaignService := NewCampaignService(repo, nil, nil)
 
 			campaign, err := campaignService.GetMyCampaignDetail(t.Context(), " 0xFundraiser ", campaignID)
 
@@ -446,7 +539,7 @@ func TestCampaignServiceGetMyCampaignDetail(t *testing.T) {
 
 func TestCampaignServiceNormalizesEndAtToPostgresPrecision(t *testing.T) {
 	repo := &campaignRepositoryStub{}
-	campaignService := NewCampaignService(repo, func() (uuid.UUID, error) { return uuid.New(), nil })
+	campaignService := NewCampaignService(repo, func() (uuid.UUID, error) { return uuid.New(), nil }, nil)
 	fixedNow := time.Date(2026, 8, 10, 4, 0, 0, 123456789, time.UTC)
 	campaignService.now = func() time.Time { return fixedNow }
 	inputEndAt := fixedNow.Add(24 * time.Hour)
@@ -459,7 +552,7 @@ func TestCampaignServiceNormalizesEndAtToPostgresPrecision(t *testing.T) {
 		Story:            "A long rescue story.",
 		GoalAmount:       1,
 		EndAt:            inputEndAt,
-		ImageObjectKey:   "campaigns/rescue.png",
+		ImageObjectKey:   "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp",
 		Country:          "Indonesia",
 		ZipCode:          "10110",
 	})

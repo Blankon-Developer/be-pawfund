@@ -10,6 +10,7 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/google/uuid"
 )
 
@@ -68,8 +69,8 @@ func (r createCampaignRequest) validate() (httpx.FieldErrors, time.Time) {
 
 	if r.ImageObjectKey == "" {
 		fieldErrors.Add("imageObjectKey", "imageObjectKey is required!")
-	} else if len(r.ImageObjectKey) > maxImageObjectKeyBytes {
-		fieldErrors.Add("imageObjectKey", "imageObjectKey must not exceed 1024 bytes!")
+	} else {
+		validateStagedImageObjectKey(fieldErrors, r.ImageObjectKey, service.CampaignImageDirectory)
 	}
 	validateRequiredLength(fieldErrors, "country", r.Country, maxCountryCharacters)
 	validateRequiredLength(fieldErrors, "zipCode", r.ZipCode, maxZipCodeCharacters)

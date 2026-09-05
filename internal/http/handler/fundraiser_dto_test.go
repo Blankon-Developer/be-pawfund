@@ -10,7 +10,7 @@ import (
 )
 
 func TestRegisterFundraiserRequestNormalize(t *testing.T) {
-	imageKey := " profiles/rescue.png "
+	imageKey := " tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg "
 	request := registerFundraiserRequest{
 		Name:  " Animal Rescue ",
 		Email: " RESCUE@EXAMPLE.COM ",
@@ -35,7 +35,7 @@ func TestRegisterFundraiserRequestNormalize(t *testing.T) {
 	if request.SocialURL != "https://example.com/rescue" || request.Country != "Indonesia" || request.ZipCode != "10110" {
 		t.Errorf("normalized fundraiser fields = %#v", request)
 	}
-	if request.ImageObjectKey == nil || *request.ImageObjectKey != "profiles/rescue.png" {
+	if request.ImageObjectKey == nil || *request.ImageObjectKey != "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg" {
 		t.Errorf("normalized image key = %#v", request.ImageObjectKey)
 	}
 

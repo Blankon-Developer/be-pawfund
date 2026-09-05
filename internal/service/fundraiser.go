@@ -39,29 +39,33 @@ type ObjectDeleter interface {
 	Delete(ctx context.Context, objectKey string) error
 }
 
+type ObjectPromoter interface {
+	Promote(ctx context.Context, sourceKey, destKey string) error
+	Discard(ctx context.Context, objectKey string)
+}
+
 type FundraiserService struct {
-	repository    repository.FundraiserRepository
-	generateID    IDGenerator
-	objectDeleter ObjectDeleter
+	repository     repository.FundraiserRepository
+	generateID     IDGenerator
+	objectDeleter  ObjectDeleter
+	objectPromoter ObjectPromoter
 }
 
 func NewFundraiserService(
 	repo repository.FundraiserRepository,
 	generateID IDGenerator,
-	objectDeleters ...ObjectDeleter,
+	objectDeleter ObjectDeleter,
+	objectPromoter ObjectPromoter,
 ) *FundraiserService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
-	var objectDeleter ObjectDeleter
-	if len(objectDeleters) > 0 {
-		objectDeleter = objectDeleters[0]
-	}
 
 	return &FundraiserService{
-		repository:    repo,
-		generateID:    generateID,
-		objectDeleter: objectDeleter,
+		repository:     repo,
+		generateID:     generateID,
+		objectDeleter:  objectDeleter,
+		objectPromoter: objectPromoter,
 	}
 }
 
@@ -69,6 +73,17 @@ func (s *FundraiserService) Register(ctx context.Context, input RegisterFundrais
 	id, err := s.generateID()
 	if err != nil {
 		return domain.Fundraiser{}, fmt.Errorf("service: generate fundraiser ID: %w", err)
+	}
+
+	stagingKey := normalizeOptionalString(input.ImageObjectKey)
+	imageObjectKey, err := promoteOptionalImageObjectKey(
+		ctx,
+		s.objectPromoter,
+		stagingKey,
+		ProfileImageDirectory,
+	)
+	if err != nil {
+		return domain.Fundraiser{}, err
 	}
 
 	socialURL := strings.TrimSpace(input.SocialURL)
@@ -80,7 +95,7 @@ func (s *FundraiserService) Register(ctx context.Context, input RegisterFundrais
 			WalletAddress: strings.TrimSpace(input.WalletAddress),
 		},
 		Name:           strings.TrimSpace(input.Name),
-		ImageObjectKey: normalizeOptionalString(input.ImageObjectKey),
+		ImageObjectKey: imageObjectKey,
 		ContactName:    strings.TrimSpace(input.ContactPerson.Name),
 		ContactPhone:   strings.TrimSpace(input.ContactPerson.Phone),
 		SocialURL:      &socialURL,
@@ -100,6 +115,7 @@ func (s *FundraiserService) Register(ctx context.Context, input RegisterFundrais
 		}
 	}
 
+	discardStagingImage(ctx, s.objectPromoter, stagingKey)
 	return created, nil
 }
 
@@ -116,10 +132,26 @@ func (s *FundraiserService) GetProfile(ctx context.Context, walletAddress string
 }
 
 func (s *FundraiserService) ReplaceProfile(ctx context.Context, input ReplaceFundraiserProfileInput) error {
+	profile := normalizeFundraiserProfileReplacement(input.Profile)
+	var stagingKey *string
+	if profile.ImageObjectKey.Set && profile.ImageObjectKey.Value != nil {
+		stagingKey = profile.ImageObjectKey.Value
+		canonical, err := promoteImageObjectKey(
+			ctx,
+			s.objectPromoter,
+			*stagingKey,
+			ProfileImageDirectory,
+		)
+		if err != nil {
+			return err
+		}
+		profile.ImageObjectKey.Value = &canonical
+	}
+
 	result, found, err := s.repository.ReplaceProfile(
 		ctx,
 		strings.TrimSpace(input.WalletAddress),
-		normalizeFundraiserProfileReplacement(input.Profile),
+		profile,
 	)
 	if err != nil {
 		switch {
@@ -133,6 +165,7 @@ func (s *FundraiserService) ReplaceProfile(ctx context.Context, input ReplaceFun
 		return ErrProfileNotFound
 	}
 
+	discardStagingImage(ctx, s.objectPromoter, stagingKey)
 	if result.DeleteOldImageFile && result.OldImageObjectKey != nil && s.objectDeleter != nil {
 		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

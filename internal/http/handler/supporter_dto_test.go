@@ -15,7 +15,7 @@ import (
 
 func TestRegisterSupporterRequestNormalize(t *testing.T) {
 	blankImage := "   "
-	image := " profiles/cat.png "
+	image := " tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg "
 
 	tests := []struct {
 		name      string
@@ -29,7 +29,7 @@ func TestRegisterSupporterRequestNormalize(t *testing.T) {
 			request:   registerSupporterRequest{Name: " Cat Lover ", Email: " CAT@EXAMPLE.COM ", ImageObjectKey: &image},
 			wantName:  "Cat Lover",
 			wantEmail: "cat@example.com",
-			wantImage: stringPointer("profiles/cat.png"),
+			wantImage: stringPointer("tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
 		},
 		{
 			name:      "normalizes blank image to nil",
@@ -63,6 +63,25 @@ func TestRegisterSupporterRequestValidate(t *testing.T) {
 		{
 			name:    "accepts valid request",
 			request: registerSupporterRequest{Name: "Cat Lover", Email: "cat@example.com"},
+		},
+		{
+			name: "accepts a staged profile image key",
+			request: registerSupporterRequest{
+				Name:           "Cat Lover",
+				Email:          "cat@example.com",
+				ImageObjectKey: stringPointer("tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
+			},
+		},
+		{
+			name: "rejects a canonical profile image key",
+			request: registerSupporterRequest{
+				Name:           "Cat Lover",
+				Email:          "cat@example.com",
+				ImageObjectKey: stringPointer("profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
+			},
+			want: httpx.FieldErrors{
+				"imageObjectKey": {"imageObjectKey must be a staged profile image key!"},
+			},
 		},
 		{
 			name:    "returns all required field errors",
@@ -113,7 +132,7 @@ func TestReplaceSupporterProfileRequestNormalizeAndValidate(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{
 		"name":" Cat Lover ",
 		"email":" CAT@EXAMPLE.COM ",
-		"imageObjectKey":" profiles/cat.png "
+		"imageObjectKey":" tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg "
 	}`), &request); err != nil {
 		t.Fatalf("decode replacement request: %v", err)
 	}
@@ -126,7 +145,7 @@ func TestReplaceSupporterProfileRequestNormalizeAndValidate(t *testing.T) {
 	if profile.Name != "Cat Lover" || profile.Email != "cat@example.com" {
 		t.Errorf("replacement profile = %#v", profile)
 	}
-	if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/cat.png" {
+	if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg" {
 		t.Errorf("image replacement = %#v", profile.ImageObjectKey)
 	}
 }

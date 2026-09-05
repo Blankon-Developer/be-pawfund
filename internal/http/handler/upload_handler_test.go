@@ -141,7 +141,7 @@ func TestHandlePresignProfileImage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			serviceStub := &uploadServiceStub{
 				result: service.PresignProfileImageResult{
-					ObjectKey: "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg",
+					ObjectKey: "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg",
 					URL:       "https://storage.example.com/presigned",
 				},
 				err: test.serviceError,
@@ -209,7 +209,7 @@ func TestHandlePresignCampaignImage(t *testing.T) {
 			wantHTTP:      http.StatusOK,
 			wantCode:      "CAMPAIGN_IMAGE_UPLOAD_PRESIGNED",
 			wantCalls:     1,
-			wantObjectKey: "campaigns/0198a123-4567-7abc-8123-456789abcdef.png",
+			wantObjectKey: "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.png",
 		},
 		{
 			name:      "rejects supporter role",
@@ -229,7 +229,7 @@ func TestHandlePresignCampaignImage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			serviceStub := &uploadServiceStub{
 				result: service.PresignCampaignImageResult{
-					ObjectKey: "campaigns/0198a123-4567-7abc-8123-456789abcdef.png",
+					ObjectKey: "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.png",
 					URL:       "https://storage.example.com/presigned",
 				},
 				err: test.serviceError,

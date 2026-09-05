@@ -22,6 +22,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 )
 
 func TestRegisterSupporterEndpoint(t *testing.T) {
@@ -35,7 +36,7 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 		t.Fatalf("create URL builder: %v", err)
 	}
 	repo := database.NewPostgresSupporterRepository(testDatabase)
-	supporterService := service.NewSupporterService(repo, uuid.NewV7)
+	supporterService := service.NewSupporterService(repo, uuid.NewV7, nil, newIntegrationObjectPromoter(t))
 	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
 	application := &app.Application{
 		DB:               testDatabase,
@@ -59,14 +60,30 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 		wantImageURL   *string
 	}{
 		{
-			name:           "registers supporter with image",
-			body:           `{"name":" Cat Lover ","email":" CAT@EXAMPLE.COM ","imageObjectKey":"profiles/cat photo.png"}`,
+			name: "registers supporter with image",
+			prepare: func(t *testing.T) {
+				putProfileImageObject(t, "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg")
+				t.Cleanup(func() {
+					removeIntegrationObject(t, "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg")
+					removeIntegrationObject(t, "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg")
+				})
+			},
+			body:           `{"name":" Cat Lover ","email":" CAT@EXAMPLE.COM ","imageObjectKey":"tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"}`,
 			walletAddress:  "0xendpoint-cat",
 			wantHTTP:       http.StatusCreated,
 			wantCode:       "SUPPORTER_REGISTERED",
 			candidateEmail: "cat@example.com",
 			wantPersisted:  true,
-			wantImageURL:   stringPointer("https://cdn.example.com/pawfund/profiles/cat%20photo.png"),
+			wantImageURL:   stringPointer("https://cdn.example.com/pawfund/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
+		},
+		{
+			name:           "rejects a missing staged image",
+			body:           `{"name":"Cat Lover","email":"missing-image@example.com","imageObjectKey":"tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"}`,
+			walletAddress:  "0xendpoint-missing-image",
+			wantHTTP:       http.StatusUnprocessableEntity,
+			wantCode:       "VALIDATION_ERROR",
+			wantErrors:     httpx.FieldErrors{"imageObjectKey": {"imageObjectKey does not reference an uploaded image!"}},
+			candidateEmail: "missing-image@example.com",
 		},
 		{
 			name:           "registers supporter without image",
@@ -192,6 +209,14 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 				}
 				if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 					t.Errorf("response image URL = %v, want %v", data.ImageURL, test.wantImageURL)
+				}
+				if test.wantImageURL != nil {
+					if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg", minio.StatObjectOptions{}); err != nil {
+						t.Errorf("canonical object missing: %v", err)
+					}
+					if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg", minio.StatObjectOptions{}); err == nil {
+						t.Error("staging object still exists")
+					}
 				}
 				if strings.Contains(string(decoded.Data), "wallet_address") {
 					t.Errorf("response does not use camelCase: %s", decoded.Data)

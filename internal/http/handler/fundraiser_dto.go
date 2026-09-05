@@ -10,6 +10,7 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	"github.com/Blankon-Developer/be-pawfund/internal/service"
 )
 
 const (
@@ -87,8 +88,8 @@ func (r registerFundraiserRequest) validate() httpx.FieldErrors {
 	validateRequiredLength(fieldErrors, "country", r.Country, maxCountryCharacters)
 	validateRequiredLength(fieldErrors, "zipCode", r.ZipCode, maxZipCodeCharacters)
 
-	if r.ImageObjectKey != nil && len(*r.ImageObjectKey) > maxImageObjectKeyBytes {
-		fieldErrors.Add("imageObjectKey", "imageObjectKey must not exceed 1024 bytes!")
+	if r.ImageObjectKey != nil {
+		validateStagedImageObjectKey(fieldErrors, *r.ImageObjectKey, service.ProfileImageDirectory)
 	}
 
 	if len(fieldErrors) == 0 {
@@ -235,8 +236,8 @@ func (r replaceFundraiserProfileRequest) validate() httpx.FieldErrors {
 	if r.ImageObjectKey.set && r.ImageObjectKey.value != nil {
 		if *r.ImageObjectKey.value == "" {
 			fieldErrors.Add("imageObjectKey", "imageObjectKey must not be empty!")
-		} else if len(*r.ImageObjectKey.value) > maxImageObjectKeyBytes {
-			fieldErrors.Add("imageObjectKey", "imageObjectKey must not exceed 1024 bytes!")
+		} else {
+			validateStagedImageObjectKey(fieldErrors, *r.ImageObjectKey.value, service.ProfileImageDirectory)
 		}
 	}
 

@@ -269,7 +269,8 @@ func TestGetPublicFundraiserProfileEndpoint(t *testing.T) {
 func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 	const fundraiserWallet = "0xFundraiserChecksum"
 	oldImageObjectKey := "profiles/fundraiser-update-old.png"
-	newImageObjectKey := "profiles/fundraiser-update-new.png"
+	newStagingImageObjectKey := "tmp/profiles/0198b123-4567-7abc-8123-456789abcdef.png"
+	newImageObjectKey := "profiles/0198b123-4567-7abc-8123-456789abcdef.png"
 
 	tests := []struct {
 		name          string
@@ -292,11 +293,13 @@ func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
 			removeIntegrationObject(t, oldImageObjectKey)
+			removeIntegrationObject(t, newStagingImageObjectKey)
 			removeIntegrationObject(t, newImageObjectKey)
 			t.Cleanup(func() { removeIntegrationObject(t, oldImageObjectKey) })
+			t.Cleanup(func() { removeIntegrationObject(t, newStagingImageObjectKey) })
 			t.Cleanup(func() { removeIntegrationObject(t, newImageObjectKey) })
 			putProfileImageObject(t, oldImageObjectKey)
-			putProfileImageObject(t, newImageObjectKey)
+			putProfileImageObject(t, newStagingImageObjectKey)
 
 			fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 			mustCreateFundraiser(t, fundraiserRepo, newFundraiser("rescue@example.com", fundraiserWallet, &oldImageObjectKey))
@@ -313,7 +316,7 @@ func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 			request := httptest.NewRequest(
 				http.MethodPut,
 				"/v1/fundraiser/profile",
-				strings.NewReader(`{"name":" Updated Rescue ","email":" updated@example.com ","imageObjectKey":"profiles/fundraiser-update-new.png","contactPerson":{"name":" Updated Contact ","phone":" +62 811 9999 "},"socialUrl":" https://example.com/updated ","country":" Malaysia ","zipCode":" 50450 "}`),
+				strings.NewReader(`{"name":" Updated Rescue ","email":" updated@example.com ","imageObjectKey":"`+newStagingImageObjectKey+`","contactPerson":{"name":" Updated Contact ","phone":" +62 811 9999 "},"socialUrl":" https://example.com/updated ","country":" Malaysia ","zipCode":" 50450 "}`),
 			)
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Authorization", "Bearer "+token)
@@ -329,6 +332,12 @@ func TestReplaceFundraiserProfileEndpoint(t *testing.T) {
 			}
 			if !test.wantOldImage && err == nil {
 				t.Error("unreferenced old image still exists")
+			}
+			if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, newImageObjectKey, minio.StatObjectOptions{}); err != nil {
+				t.Errorf("canonical replacement image missing: %v", err)
+			}
+			if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, newStagingImageObjectKey, minio.StatObjectOptions{}); err == nil {
+				t.Error("staging replacement image still exists")
 			}
 
 			getRequest := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/profile", nil)
@@ -502,6 +511,25 @@ func TestFundraiserProfileReplaceRouteRejectsPatch(t *testing.T) {
 	}
 }
 
+func testStorageConfig() storage.PresignerConfig {
+	return storage.PresignerConfig{
+		Endpoint:  testStorageEndpoint,
+		AccessKey: testStorageAccessKey,
+		SecretKey: testStorageSecretKey,
+		Bucket:    testStorageBucket,
+		Region:    testStorageRegion,
+	}
+}
+
+func newIntegrationObjectPromoter(t *testing.T) *storage.ObjectPromoter {
+	t.Helper()
+	promoter, err := storage.NewObjectPromoter(testStorageConfig())
+	if err != nil {
+		t.Fatalf("create object promoter: %v", err)
+	}
+	return promoter
+}
+
 func putProfileImageObject(t *testing.T, objectKey string) {
 	t.Helper()
 	if _, err := testStorageClient.PutObject(
@@ -532,17 +560,11 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 		t.Fatalf("create URL builder: %v", err)
 	}
 	fundraiserRepository := database.NewPostgresFundraiserRepository(testDatabase)
-	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
-		Endpoint:  testStorageEndpoint,
-		AccessKey: testStorageAccessKey,
-		SecretKey: testStorageSecretKey,
-		Bucket:    testStorageBucket,
-		Region:    testStorageRegion,
-	})
+	objectDeleter, err := storage.NewObjectDeleter(testStorageConfig())
 	if err != nil {
 		t.Fatalf("create object deleter: %v", err)
 	}
-	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
+	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter, newIntegrationObjectPromoter(t))
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),

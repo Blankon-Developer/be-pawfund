@@ -310,6 +310,14 @@ func (h *SupporterHandler) handleServiceError(w http.ResponseWriter, err error) 
 			"Wallet address is already registered.",
 			httpx.FieldErrors{"walletAddress": {"wallet address is already registered!"}},
 		)
+	case errors.Is(err, service.ErrInvalidImageObjectKey):
+		h.ValidationError(w, httpx.FieldErrors{
+			"imageObjectKey": {stagedImageObjectKeyMessage(service.ProfileImageDirectory)},
+		})
+	case errors.Is(err, service.ErrImageObjectNotFound):
+		h.ValidationError(w, httpx.FieldErrors{
+			"imageObjectKey": {stagedImageObjectNotFoundMessage()},
+		})
 	default:
 		h.Logger.Error("register supporter", "error", err)
 		h.InternalError(w)

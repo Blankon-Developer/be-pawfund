@@ -156,7 +156,8 @@ func TestGetSupporterProfileEndpoint(t *testing.T) {
 func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 	const supporterWallet = "0xSupporterChecksum"
 	oldImageObjectKey := "profiles/supporter-update-old.png"
-	newImageObjectKey := "profiles/supporter-update-new.png"
+	newStagingImageObjectKey := "tmp/profiles/0198b123-4567-7abc-8123-456789abcdef.png"
+	newImageObjectKey := "profiles/0198b123-4567-7abc-8123-456789abcdef.png"
 
 	tests := []struct {
 		name          string
@@ -172,11 +173,13 @@ func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
 			removeIntegrationObject(t, oldImageObjectKey)
+			removeIntegrationObject(t, newStagingImageObjectKey)
 			removeIntegrationObject(t, newImageObjectKey)
 			t.Cleanup(func() { removeIntegrationObject(t, oldImageObjectKey) })
+			t.Cleanup(func() { removeIntegrationObject(t, newStagingImageObjectKey) })
 			t.Cleanup(func() { removeIntegrationObject(t, newImageObjectKey) })
 			putProfileImageObject(t, oldImageObjectKey)
-			putProfileImageObject(t, newImageObjectKey)
+			putProfileImageObject(t, newStagingImageObjectKey)
 
 			supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 			mustCreateSupporter(t, supporterRepo, newSupporter("cat@example.com", supporterWallet, &oldImageObjectKey))
@@ -190,7 +193,7 @@ func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("generate access token: %v", err)
 			}
-			request := httptest.NewRequest(http.MethodPut, "/v1/supporter/profile", strings.NewReader(`{"name":" Updated Cat Lover ","email":" updated@example.com ","imageObjectKey":"profiles/supporter-update-new.png"}`))
+			request := httptest.NewRequest(http.MethodPut, "/v1/supporter/profile", strings.NewReader(`{"name":" Updated Cat Lover ","email":" updated@example.com ","imageObjectKey":"`+newStagingImageObjectKey+`"}`))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Authorization", "Bearer "+token)
 			response := httptest.NewRecorder()
@@ -205,6 +208,12 @@ func TestReplaceSupporterProfileEndpoint(t *testing.T) {
 			}
 			if !test.wantOldImage && err == nil {
 				t.Error("unreferenced old image still exists")
+			}
+			if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, newImageObjectKey, minio.StatObjectOptions{}); err != nil {
+				t.Errorf("canonical replacement image missing: %v", err)
+			}
+			if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, newStagingImageObjectKey, minio.StatObjectOptions{}); err == nil {
+				t.Error("staging replacement image still exists")
 			}
 
 			getRequest := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
@@ -349,17 +358,11 @@ func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWT
 		t.Fatalf("create URL builder: %v", err)
 	}
 	supporterRepository := database.NewPostgresSupporterRepository(testDatabase)
-	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
-		Endpoint:  testStorageEndpoint,
-		AccessKey: testStorageAccessKey,
-		SecretKey: testStorageSecretKey,
-		Bucket:    testStorageBucket,
-		Region:    testStorageRegion,
-	})
+	objectDeleter, err := storage.NewObjectDeleter(testStorageConfig())
 	if err != nil {
 		t.Fatalf("create object deleter: %v", err)
 	}
-	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
+	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter, newIntegrationObjectPromoter(t))
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),

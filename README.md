@@ -50,6 +50,13 @@ cross-origin browser requests. The application does not create the bucket.
 Bucket creation, public-read policy, lifecycle rules, and CORS for the frontend
 origin and `PUT` method are managed separately.
 
+Presigned uploads land under `tmp/profiles/` or `tmp/campaigns/`. Successful
+register, profile update, and campaign-create requests copy that object to
+`profiles/` or `campaigns/`, persist the canonical key, then delete the
+staging object. Failed commits leave the file in `tmp/` so the client can
+retry; production Cloudflare R2 expires leftover `tmp/` objects after 7 days.
+Public GET access should be limited to the committed prefixes, not `tmp/`.
+
 ## Tests
 
 Unit and integration tests use table-driven test cases. Integration tests run

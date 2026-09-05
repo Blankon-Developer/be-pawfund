@@ -79,15 +79,20 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize storage presigner: %w", err))
 	}
-	objectDeleter, err := storage.NewObjectDeleter(storage.PresignerConfig{
+	storageConfig := storage.PresignerConfig{
 		Endpoint:  cfg.StorageEndpoint,
 		AccessKey: cfg.StorageAccessKey,
 		SecretKey: cfg.StorageSecretKey,
 		Bucket:    cfg.StorageBucket,
 		Region:    cfg.StorageRegion,
-	})
+	}
+	objectDeleter, err := storage.NewObjectDeleter(storageConfig)
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize storage object deleter: %w", err))
+	}
+	objectPromoter, err := storage.NewObjectPromoter(storageConfig)
+	if err != nil {
+		return fail(fmt.Errorf("app: initialize storage object promoter: %w", err))
 	}
 
 	cacheClient, err = cache.Open(ctx, cache.Config{URL: cfg.CacheURL, KeyPrefix: cfg.CacheKeyPrefix})
@@ -105,9 +110,9 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	campaignRepository := database.NewPostgresCampaignRepository(db)
 	authRepository := database.NewPostgresAuthRepository(db)
 
-	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter)
-	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter)
-	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7)
+	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter, objectPromoter)
+	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter, objectPromoter)
+	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7, objectPromoter)
 	authService := service.NewAuthService(
 		cacheClient,
 		authRepository,

@@ -278,6 +278,14 @@ func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Re
 			h.ValidationError(w, httpx.FieldErrors{
 				"endAt": {"endAt must be at least 5 minutes in the future!"},
 			})
+		case errors.Is(err, service.ErrInvalidImageObjectKey):
+			h.ValidationError(w, httpx.FieldErrors{
+				"imageObjectKey": {stagedImageObjectKeyMessage(service.CampaignImageDirectory)},
+			})
+		case errors.Is(err, service.ErrImageObjectNotFound):
+			h.ValidationError(w, httpx.FieldErrors{
+				"imageObjectKey": {stagedImageObjectNotFoundMessage()},
+			})
 		case errors.Is(err, service.ErrCampaignIdempotencyConflict):
 			h.Error(
 				w,

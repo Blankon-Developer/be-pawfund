@@ -34,16 +34,26 @@ type CreateCampaignInput struct {
 }
 
 type CampaignService struct {
-	repository repository.CampaignRepository
-	generateID IDGenerator
-	now        func() time.Time
+	repository     repository.CampaignRepository
+	generateID     IDGenerator
+	objectPromoter ObjectPromoter
+	now            func() time.Time
 }
 
-func NewCampaignService(repo repository.CampaignRepository, generateID IDGenerator) *CampaignService {
+func NewCampaignService(
+	repo repository.CampaignRepository,
+	generateID IDGenerator,
+	objectPromoter ObjectPromoter,
+) *CampaignService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
-	return &CampaignService{repository: repo, generateID: generateID, now: time.Now}
+	return &CampaignService{
+		repository:     repo,
+		generateID:     generateID,
+		objectPromoter: objectPromoter,
+		now:            time.Now,
+	}
 }
 
 func (s *CampaignService) ListPublicCampaigns(
@@ -125,6 +135,17 @@ func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput)
 		return domain.Campaign{}, fmt.Errorf("service: generate campaign ID: %w", err)
 	}
 
+	stagingKey := strings.TrimSpace(input.ImageObjectKey)
+	imageObjectKey, err := promoteImageObjectKey(
+		ctx,
+		s.objectPromoter,
+		stagingKey,
+		CampaignImageDirectory,
+	)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+
 	campaign := domain.Campaign{
 		ID:               id,
 		Title:            strings.TrimSpace(input.Title),
@@ -132,7 +153,7 @@ func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput)
 		Story:            strings.TrimSpace(input.Story),
 		GoalAmount:       input.GoalAmount,
 		EndAt:            input.EndAt.UTC().Truncate(time.Microsecond),
-		ImageObjectKey:   strings.TrimSpace(input.ImageObjectKey),
+		ImageObjectKey:   imageObjectKey,
 		Country:          strings.TrimSpace(input.Country),
 		ZipCode:          strings.TrimSpace(input.ZipCode),
 		Status:           domain.CampaignStatusActive,
@@ -158,5 +179,7 @@ func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput)
 			return domain.Campaign{}, fmt.Errorf("service: create pending campaign: %w", err)
 		}
 	}
+
+	discardStagingImage(ctx, s.objectPromoter, &stagingKey)
 	return created, nil
 }

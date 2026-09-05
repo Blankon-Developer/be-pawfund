@@ -26,28 +26,27 @@ type ReplaceSupporterProfileInput struct {
 }
 
 type SupporterService struct {
-	repository    repository.SupporterRepository
-	generateID    IDGenerator
-	objectDeleter ObjectDeleter
+	repository     repository.SupporterRepository
+	generateID     IDGenerator
+	objectDeleter  ObjectDeleter
+	objectPromoter ObjectPromoter
 }
 
 func NewSupporterService(
 	repo repository.SupporterRepository,
 	generateID IDGenerator,
-	objectDeleters ...ObjectDeleter,
+	objectDeleter ObjectDeleter,
+	objectPromoter ObjectPromoter,
 ) *SupporterService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
-	var objectDeleter ObjectDeleter
-	if len(objectDeleters) > 0 {
-		objectDeleter = objectDeleters[0]
-	}
 
 	return &SupporterService{
-		repository:    repo,
-		generateID:    generateID,
-		objectDeleter: objectDeleter,
+		repository:     repo,
+		generateID:     generateID,
+		objectDeleter:  objectDeleter,
+		objectPromoter: objectPromoter,
 	}
 }
 
@@ -55,6 +54,17 @@ func (s *SupporterService) Register(ctx context.Context, input RegisterSupporter
 	id, err := s.generateID()
 	if err != nil {
 		return domain.Supporter{}, fmt.Errorf("service: generate supporter ID: %w", err)
+	}
+
+	stagingKey := normalizeOptionalString(input.ImageObjectKey)
+	imageObjectKey, err := promoteOptionalImageObjectKey(
+		ctx,
+		s.objectPromoter,
+		stagingKey,
+		ProfileImageDirectory,
+	)
+	if err != nil {
+		return domain.Supporter{}, err
 	}
 
 	supporter := domain.Supporter{
@@ -65,7 +75,7 @@ func (s *SupporterService) Register(ctx context.Context, input RegisterSupporter
 			WalletAddress: strings.TrimSpace(input.WalletAddress),
 		},
 		Name:           strings.TrimSpace(input.Name),
-		ImageObjectKey: normalizeOptionalString(input.ImageObjectKey),
+		ImageObjectKey: imageObjectKey,
 	}
 
 	created, err := s.repository.Create(ctx, supporter)
@@ -80,6 +90,7 @@ func (s *SupporterService) Register(ctx context.Context, input RegisterSupporter
 		}
 	}
 
+	discardStagingImage(ctx, s.objectPromoter, stagingKey)
 	return created, nil
 }
 
@@ -116,10 +127,26 @@ func (s *SupporterService) ListMyDonations(
 }
 
 func (s *SupporterService) ReplaceProfile(ctx context.Context, input ReplaceSupporterProfileInput) error {
+	profile := normalizeSupporterProfileReplacement(input.Profile)
+	var stagingKey *string
+	if profile.ImageObjectKey.Set && profile.ImageObjectKey.Value != nil {
+		stagingKey = profile.ImageObjectKey.Value
+		canonical, err := promoteImageObjectKey(
+			ctx,
+			s.objectPromoter,
+			*stagingKey,
+			ProfileImageDirectory,
+		)
+		if err != nil {
+			return err
+		}
+		profile.ImageObjectKey.Value = &canonical
+	}
+
 	result, found, err := s.repository.ReplaceProfile(
 		ctx,
 		strings.TrimSpace(input.WalletAddress),
-		normalizeSupporterProfileReplacement(input.Profile),
+		profile,
 	)
 	if err != nil {
 		switch {
@@ -133,6 +160,7 @@ func (s *SupporterService) ReplaceProfile(ctx context.Context, input ReplaceSupp
 		return ErrProfileNotFound
 	}
 
+	discardStagingImage(ctx, s.objectPromoter, stagingKey)
 	if result.DeleteOldImageFile && result.OldImageObjectKey != nil && s.objectDeleter != nil {
 		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

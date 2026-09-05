@@ -109,13 +109,24 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 	}{
 		{
 			name:          "registers fundraiser with authenticated wallet",
-			body:          strings.TrimSuffix(validBody, "}") + `,"imageObjectKey":"profiles/rescue photo.png"}`,
+			body:          strings.TrimSuffix(validBody, "}") + `,"imageObjectKey":"tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"}`,
 			contentType:   "application/json",
 			walletAddress: "0xWalletChecksum",
 			wantHTTP:      http.StatusCreated,
 			wantCode:      "FUNDRAISER_REGISTERED",
 			wantCall:      true,
-			wantImageURL:  stringPointer("https://cdn.example.com/pawfund/profiles/rescue%20photo.png"),
+			wantImageURL:  stringPointer("https://cdn.example.com/pawfund/tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"),
+		},
+		{
+			name:          "maps a missing staged image",
+			body:          strings.TrimSuffix(validBody, "}") + `,"imageObjectKey":"tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"}`,
+			contentType:   "application/json",
+			walletAddress: "0xWalletChecksum",
+			serviceError:  service.ErrImageObjectNotFound,
+			wantHTTP:      http.StatusUnprocessableEntity,
+			wantCode:      "VALIDATION_ERROR",
+			wantErrors:    httpx.FieldErrors{"imageObjectKey": {"imageObjectKey does not reference an uploaded image!"}},
+			wantCall:      true,
 		},
 		{
 			name:          "returns null image URL when image is omitted",

@@ -36,7 +36,7 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 		t.Fatalf("create URL builder: %v", err)
 	}
 	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
-	fundraiserService := service.NewFundraiserService(fundraiserRepo, uuid.NewV7)
+	fundraiserService := service.NewFundraiserService(fundraiserRepo, uuid.NewV7, nil, newIntegrationObjectPromoter(t))
 	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
 	application := &app.Application{
 		DB:                testDatabase,
@@ -47,7 +47,9 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 	}
 	router := routes.Setup(application, logger)
 
-	validBody := `{"name":" Animal Rescue ","email":" RESCUE@EXAMPLE.COM ","contactPerson":{"name":" Jane Doe ","phone":" +62 812 3456 "},"socialUrl":"https://example.com/rescue","country":" Indonesia ","zipCode":" 10110 ","imageObjectKey":"profiles/rescue photo.png"}`
+	stagingImageKey := "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+	canonicalImageKey := "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+	validBody := `{"name":" Animal Rescue ","email":" RESCUE@EXAMPLE.COM ","contactPerson":{"name":" Jane Doe ","phone":" +62 812 3456 "},"socialUrl":"https://example.com/rescue","country":" Indonesia ","zipCode":" 10110 ","imageObjectKey":"` + stagingImageKey + `"}`
 	supporterRepo := database.NewPostgresSupporterRepository(testDatabase)
 
 	tests := []struct {
@@ -134,6 +136,13 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
+			if strings.Contains(test.body, stagingImageKey) {
+				putProfileImageObject(t, stagingImageKey)
+				t.Cleanup(func() {
+					removeIntegrationObject(t, stagingImageKey)
+					removeIntegrationObject(t, canonicalImageKey)
+				})
+			}
 			if test.prepare != nil {
 				test.prepare(t)
 			}
@@ -188,7 +197,7 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 				if data.WalletAddress != test.walletAddress || data.Role != domain.UserRoleFundraiser {
 					t.Errorf("response identity = %q/%q", data.WalletAddress, data.Role)
 				}
-				wantImageURL := "https://cdn.example.com/pawfund/profiles/rescue%20photo.png"
+				wantImageURL := "https://cdn.example.com/pawfund/" + canonicalImageKey
 				if data.ImageURL == nil || *data.ImageURL != wantImageURL {
 					t.Errorf("response image URL = %#v, want %q", data.ImageURL, wantImageURL)
 				}

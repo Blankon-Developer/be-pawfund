@@ -129,7 +129,7 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 	createdAt := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
 	endAt := createdAt.Add(30 * 24 * time.Hour)
 	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
-	validBody := `{"title":" Emergency Rescue ","shortDescription":" Help rescued animals ","story":" A long rescue story. ","goalAmount":10000000000,"endAt":"` + endAt.Format(time.RFC3339) + `","imageObjectKey":" campaigns/rescue photo.png ","country":" Indonesia ","zipCode":" 10110 "}`
+	validBody := `{"title":" Emergency Rescue ","shortDescription":" Help rescued animals ","story":" A long rescue story. ","goalAmount":10000000000,"endAt":"` + endAt.Format(time.RFC3339) + `","imageObjectKey":" tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp ","country":" Indonesia ","zipCode":" 10110 "}`
 	unexpectedFailure := errors.New("database unavailable")
 
 	tests := []struct {
@@ -217,6 +217,16 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 			serviceError:   service.ErrProfileNotFound,
 			wantHTTP:       http.StatusNotFound,
 			wantCode:       "PROFILE_NOT_FOUND",
+			wantCalls:      1,
+		},
+		{
+			name:           "maps a missing staged image",
+			body:           validBody,
+			principal:      &auth.Principal{WalletAddress: "0xFundraiser", Role: domain.UserRoleFundraiser},
+			idempotencyKey: "key",
+			serviceError:   service.ErrImageObjectNotFound,
+			wantHTTP:       http.StatusUnprocessableEntity,
+			wantCode:       "VALIDATION_ERROR",
 			wantCalls:      1,
 		},
 		{

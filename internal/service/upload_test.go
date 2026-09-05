@@ -73,7 +73,7 @@ func TestUploadServicePresignProfileImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PresignProfileImage() unexpected error: %v", err)
 	}
-	wantKey := "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+	wantKey := "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
 	if result.ObjectKey != wantKey || result.URL != presigner.url {
 		t.Errorf("result = %#v", result)
 	}
@@ -96,7 +96,7 @@ func TestUploadServicePresignCampaignImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PresignCampaignImage() unexpected error: %v", err)
 	}
-	wantKey := "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+	wantKey := "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
 	if result.ObjectKey != wantKey || result.URL != presigner.url {
 		t.Errorf("result = %#v", result)
 	}
@@ -116,7 +116,7 @@ func TestUploadServiceUsesUUIDV7ByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PresignProfileImage() unexpected error: %v", err)
 	}
-	rawID := strings.TrimSuffix(strings.TrimPrefix(result.ObjectKey, "profiles/"), ".png")
+	rawID := strings.TrimSuffix(strings.TrimPrefix(result.ObjectKey, "tmp/profiles/"), ".png")
 	id, err := uuid.Parse(rawID)
 	if err != nil {
 		t.Fatalf("object key UUID = %q: %v", rawID, err)

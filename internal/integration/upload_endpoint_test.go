@@ -124,7 +124,7 @@ func TestProfileImagePresignEndpoint(t *testing.T) {
 			t.Fatalf("raw PUT status = %d; body: %s", response.StatusCode, readResponseBody(t, response))
 		}
 		_ = response.Body.Close()
-		if !strings.HasPrefix(presigned.ObjectKey, "campaigns/") {
+		if !strings.HasPrefix(presigned.ObjectKey, "tmp/campaigns/") {
 			t.Errorf("campaign object key = %q", presigned.ObjectKey)
 		}
 	})
@@ -208,7 +208,7 @@ func requestProfileImagePresign(
 	if err := json.Unmarshal(result.Data, &data); err != nil {
 		t.Fatalf("decode presign response: %v", err)
 	}
-	if !strings.HasPrefix(data.ObjectKey, "profiles/") || data.URL == "" {
+	if !strings.HasPrefix(data.ObjectKey, "tmp/profiles/") || data.URL == "" {
 		t.Fatalf("presign data = %#v", data)
 	}
 	return data

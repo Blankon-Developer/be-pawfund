@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/repository"
 	"github.com/google/uuid"
 )
@@ -90,7 +91,7 @@ func TestSupporterServiceRegister(t *testing.T) {
 	fixedTime := time.Date(2026, time.August, 2, 10, 0, 0, 0, time.UTC)
 	idFailure := errors.New("ID failure")
 	repositoryFailure := errors.New("repository failure")
-	imageKey := "profiles/cat.png"
+	imageKey := "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
 
 	tests := []struct {
 		name               string
@@ -149,7 +150,7 @@ func TestSupporterServiceRegister(t *testing.T) {
 					if supporter.WalletAddress != "0xWallet" {
 						t.Errorf("wallet address = %q", supporter.WalletAddress)
 					}
-					if supporter.ImageObjectKey == nil || *supporter.ImageObjectKey != imageKey {
+					if supporter.ImageObjectKey == nil || *supporter.ImageObjectKey != "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg" {
 						t.Errorf("image object key = %#v", supporter.ImageObjectKey)
 					}
 
@@ -166,7 +167,7 @@ func TestSupporterServiceRegister(t *testing.T) {
 				}
 				return fixedID, nil
 			}
-			supporterService := NewSupporterService(repo, generator)
+			supporterService := NewSupporterService(repo, generator, nil, nil)
 
 			created, err := supporterService.Register(ctx, RegisterSupporterInput{
 				Name:           " Cat Lover ",
@@ -188,6 +189,110 @@ func TestSupporterServiceRegister(t *testing.T) {
 				}
 			}
 
+			if (repo.called > 0) != test.wantRepositoryCall {
+				t.Errorf("repository calls = %d, want called = %v", repo.called, test.wantRepositoryCall)
+			}
+		})
+	}
+}
+
+func TestSupporterServiceRegisterImageObjectKey(t *testing.T) {
+	fixedID := uuid.MustParse("0198f1a8-c0c0-7e1a-a604-d2b6942fc011")
+	stagingKey := "tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+	canonicalKey := "profiles/0198a123-4567-7abc-8123-456789abcdef.jpg"
+	invalidKey := "profiles/cat.png"
+
+	tests := []struct {
+		name               string
+		imageObjectKey     *string
+		promoteError       error
+		repositoryError    error
+		wantError          error
+		wantPromote        bool
+		wantDiscard        bool
+		wantRepositoryCall bool
+		wantPersistedKey   string
+	}{
+		{
+			name:               "promotes staged image before persist then discards staging",
+			imageObjectKey:     &stagingKey,
+			wantPromote:        true,
+			wantDiscard:        true,
+			wantRepositoryCall: true,
+			wantPersistedKey:   canonicalKey,
+		},
+		{
+			name:           "rejects canonical image key",
+			imageObjectKey: &invalidKey,
+			wantError:      ErrInvalidImageObjectKey,
+		},
+		{
+			name:           "maps missing staged object",
+			imageObjectKey: &stagingKey,
+			promoteError:   storage.ErrObjectNotFound,
+			wantError:      ErrImageObjectNotFound,
+			wantPromote:    true,
+		},
+		{
+			name:               "keeps staging object when persist fails",
+			imageObjectKey:     &stagingKey,
+			repositoryError:    repository.ErrEmailAlreadyExists,
+			wantError:          ErrEmailAlreadyRegistered,
+			wantPromote:        true,
+			wantRepositoryCall: true,
+			wantPersistedKey:   canonicalKey,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			promoter := &stubObjectPromoter{err: test.promoteError}
+			repo := &stubSupporterRepository{
+				create: func(_ context.Context, supporter domain.Supporter) (domain.Supporter, error) {
+					if promoter.calls != 1 {
+						t.Errorf("promoter calls before persist = %d", promoter.calls)
+					}
+					if promoter.discardCalls != 0 {
+						t.Errorf("discard calls before persist = %d", promoter.discardCalls)
+					}
+					if supporter.ImageObjectKey == nil || *supporter.ImageObjectKey != test.wantPersistedKey {
+						t.Errorf("persisted key = %#v, want %q", supporter.ImageObjectKey, test.wantPersistedKey)
+					}
+					if test.repositoryError != nil {
+						return domain.Supporter{}, test.repositoryError
+					}
+					return supporter, nil
+				},
+			}
+			supporterService := NewSupporterService(repo, func() (uuid.UUID, error) {
+				return fixedID, nil
+			}, nil, promoter)
+
+			_, err := supporterService.Register(t.Context(), RegisterSupporterInput{
+				Name:           "Cat Lover",
+				Email:          "cat@example.com",
+				WalletAddress:  "0xWallet",
+				ImageObjectKey: test.imageObjectKey,
+			})
+			if test.wantError != nil {
+				if !errors.Is(err, test.wantError) {
+					t.Fatalf("Register() error = %v, want %v", err, test.wantError)
+				}
+			} else if err != nil {
+				t.Fatalf("Register() unexpected error: %v", err)
+			}
+			if (promoter.calls > 0) != test.wantPromote {
+				t.Errorf("promoter calls = %d, want called = %v", promoter.calls, test.wantPromote)
+			}
+			if test.wantPromote && (promoter.sourceKey != stagingKey || promoter.destKey != canonicalKey) {
+				t.Errorf("promote %q → %q", promoter.sourceKey, promoter.destKey)
+			}
+			if (promoter.discardCalls > 0) != test.wantDiscard {
+				t.Errorf("discard calls = %d, want called = %v", promoter.discardCalls, test.wantDiscard)
+			}
+			if test.wantDiscard && promoter.discardedKey != stagingKey {
+				t.Errorf("discarded key = %q, want %q", promoter.discardedKey, stagingKey)
+			}
 			if (repo.called > 0) != test.wantRepositoryCall {
 				t.Errorf("repository calls = %d, want called = %v", repo.called, test.wantRepositoryCall)
 			}
@@ -244,7 +349,7 @@ func TestSupporterServiceGetProfile(t *testing.T) {
 					return profile, test.found, test.repoError
 				},
 			}
-			supporterService := NewSupporterService(repo, nil)
+			supporterService := NewSupporterService(repo, nil, nil, nil)
 
 			got, err := supporterService.GetProfile(ctx, " 0xWalletChecksum ")
 			if test.wantError != nil {
@@ -300,7 +405,7 @@ func TestSupporterServiceListMyDonations(t *testing.T) {
 					return donations, test.found, test.repositoryError
 				},
 			}
-			supporterService := NewSupporterService(repo, nil)
+			supporterService := NewSupporterService(repo, nil, nil, nil)
 
 			got, err := supporterService.ListMyDonations(ctx, " 0xSupporter ", options)
 			if test.wantError != nil {
@@ -382,13 +487,13 @@ func TestSupporterServiceReplaceProfile(t *testing.T) {
 					if profile.Name != "Cat Lover" || profile.Email != "cat@example.com" {
 						t.Errorf("normalized replacement = %#v", profile)
 					}
-					if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/new.png" {
+					if !profile.ImageObjectKey.Set || profile.ImageObjectKey.Value == nil || *profile.ImageObjectKey.Value != "profiles/0198a123-4567-7abc-8123-456789abcdef.png" {
 						t.Errorf("image replacement = %#v", profile.ImageObjectKey)
 					}
 					return test.replaceResult, test.found, test.repositoryError
 				},
 			}
-			supporterService := NewSupporterService(repo, nil, deleter)
+			supporterService := NewSupporterService(repo, nil, deleter, nil)
 			err := supporterService.ReplaceProfile(ctx, ReplaceSupporterProfileInput{
 				WalletAddress: " 0xWalletChecksum ",
 				Profile: domain.SupporterProfileReplacement{
@@ -396,7 +501,7 @@ func TestSupporterServiceReplaceProfile(t *testing.T) {
 					Email: " CAT@EXAMPLE.COM ",
 					ImageObjectKey: domain.ImageObjectKeyUpdate{
 						Set:   true,
-						Value: serviceStringPointer(" profiles/new.png "),
+						Value: serviceStringPointer(" tmp/profiles/0198a123-4567-7abc-8123-456789abcdef.png "),
 					},
 				},
 			})
@@ -477,7 +582,7 @@ func TestSupporterServiceDeleteProfile(t *testing.T) {
 					return test.deleteResult, test.found, test.repositoryError
 				},
 			}
-			supporterService := NewSupporterService(repo, nil, deleter)
+			supporterService := NewSupporterService(repo, nil, deleter, nil)
 			err := supporterService.DeleteProfile(ctx, " 0xWalletChecksum ")
 
 			if test.wantError != nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 )
 
 func TestCreateCampaignEndpoint(t *testing.T) {
@@ -40,7 +41,14 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 		t.Fatalf("generate fundraiser token: %v", err)
 	}
 	endAt := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
-	validBody := `{"title":"Emergency Rescue","shortDescription":"Help rescued animals","story":"A long rescue story.","goalAmount":10000000000,"endAt":"` + endAt.Format(time.RFC3339) + `","imageObjectKey":"campaigns/rescue photo.png","country":"Indonesia","zipCode":"10110"}`
+	stagingImageKey := "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+	canonicalImageKey := "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
+	putProfileImageObject(t, stagingImageKey)
+	t.Cleanup(func() {
+		removeIntegrationObject(t, stagingImageKey)
+		removeIntegrationObject(t, canonicalImageKey)
+	})
+	validBody := `{"title":"Emergency Rescue","shortDescription":"Help rescued animals","story":"A long rescue story.","goalAmount":10000000000,"endAt":"` + endAt.Format(time.RFC3339) + `","imageObjectKey":"` + stagingImageKey + `","country":"Indonesia","zipCode":"10110"}`
 
 	first := requestCreateCampaign(t, router, fundraiserToken, "create-rescue-1", validBody)
 	if first.Code != http.StatusCreated {
@@ -71,9 +79,15 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 	if firstEnvelope.Data.Status != domain.CampaignStatusActive || firstEnvelope.Data.DeploymentStatus != domain.CampaignDeploymentStatusPending || firstEnvelope.Data.ContractAddress != nil {
 		t.Errorf("create state = %#v", firstEnvelope.Data)
 	}
-	wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
+	wantImageURL := "https://cdn.example.com/pawfund/" + canonicalImageKey
 	if firstEnvelope.Data.ImageURL == nil || *firstEnvelope.Data.ImageURL != wantImageURL {
 		t.Errorf("image URL = %#v, want %q", firstEnvelope.Data.ImageURL, wantImageURL)
+	}
+	if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, canonicalImageKey, minio.StatObjectOptions{}); err != nil {
+		t.Errorf("canonical campaign image missing: %v", err)
+	}
+	if _, err := testStorageClient.StatObject(t.Context(), testStorageBucket, stagingImageKey, minio.StatObjectOptions{}); err == nil {
+		t.Error("staging campaign image still exists")
 	}
 
 	replayed := requestCreateCampaign(t, router, fundraiserToken, "create-rescue-1", validBody)
@@ -702,7 +716,7 @@ func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager)
 		t.Fatalf("create public URL builder: %v", err)
 	}
 	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
-	campaignService := service.NewCampaignService(campaignRepo, uuid.NewV7)
+	campaignService := service.NewCampaignService(campaignRepo, uuid.NewV7, newIntegrationObjectPromoter(t))
 	application := &app.Application{
 		CampaignHandler: handler.NewCampaignHandler(campaignService, urlBuilder, logger),
 		Authenticate:    appmiddleware.Authenticate(jwtManager, logger),
