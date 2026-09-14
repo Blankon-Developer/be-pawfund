@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
@@ -455,26 +456,27 @@ func TestPostgresFundraiserRepositoryDeleteProfile(t *testing.T) {
 	}
 }
 
-func TestPostgresFundraiserRepositoryDeleteProfileDeploymentStatuses(t *testing.T) {
+func TestPostgresFundraiserRepositoryDeleteProfileCampaignStatuses(t *testing.T) {
 	tests := []struct {
-		deploymentStatus domain.CampaignDeploymentStatus
-		wantBlocked      bool
+		status      domain.CampaignStatus
+		wantBlocked bool
 	}{
-		{deploymentStatus: domain.CampaignDeploymentStatusPending, wantBlocked: true},
-		{deploymentStatus: domain.CampaignDeploymentStatusSubmitted, wantBlocked: true},
-		{deploymentStatus: domain.CampaignDeploymentStatusDeployed, wantBlocked: true},
-		{deploymentStatus: domain.CampaignDeploymentStatusFailed},
+		{status: domain.CampaignStatusPending, wantBlocked: true},
+		{status: domain.CampaignStatusActive, wantBlocked: true},
+		{status: domain.CampaignStatusFailed},
+		{status: domain.CampaignStatusCompleted},
+		{status: domain.CampaignStatusCancelled},
 	}
 
 	for _, test := range tests {
-		t.Run(string(test.deploymentStatus), func(t *testing.T) {
+		t.Run(string(test.status), func(t *testing.T) {
 			cleanDatabase(t)
 			t.Cleanup(func() { cleanDatabase(t) })
-			const walletAddress = "0xDeploymentStatusFundraiser"
+			const walletAddress = "0xCampaignStatusFundraiser"
 			repo := database.NewPostgresFundraiserRepository(testDatabase)
-			fundraiser := newFundraiser("deployment@example.com", walletAddress, nil)
+			fundraiser := newFundraiser("campaign-status@example.com", walletAddress, nil)
 			mustCreateFundraiser(t, repo, fundraiser)
-			mustCreateCampaignWithDeploymentStatus(t, fundraiser.ID, test.deploymentStatus)
+			mustCreateCampaignWithStatus(t, fundraiser.ID, test.status)
 
 			_, _, err := repo.DeleteProfile(t.Context(), walletAddress)
 			if test.wantBlocked {
@@ -518,42 +520,22 @@ func mustCreateFundraiser(t *testing.T, repo *database.PostgresFundraiserReposit
 
 func mustCreateActiveCampaign(t *testing.T, fundraiserID uuid.UUID) {
 	t.Helper()
-	mustCreateCampaignWithDeploymentStatus(t, fundraiserID, domain.CampaignDeploymentStatusDeployed)
+	mustCreateCampaignWithStatus(t, fundraiserID, domain.CampaignStatusActive)
 }
 
-func mustCreateCampaignWithDeploymentStatus(
+func mustCreateCampaignWithStatus(
 	t *testing.T,
 	fundraiserID uuid.UUID,
-	deploymentStatus domain.CampaignDeploymentStatus,
+	status domain.CampaignStatus,
 ) {
 	t.Helper()
-	var (
-		eventValue    any
-		contractValue any
-		keySuffix     = uuid.New().String()
-	)
-	if deploymentStatus == domain.CampaignDeploymentStatusDeployed {
-		eventID := uuid.New()
-		if _, err := testDatabase.ExecContext(
-			t.Context(),
-			`INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
-			 VALUES ($1, $2, $3, 'campaign_created', $4, CURRENT_TIMESTAMP)`,
-			eventID,
-			"tx-"+eventID.String(),
-			0,
-			1,
-		); err != nil {
-			t.Fatalf("prepare campaign event: %v", err)
-		}
-		eventValue = eventID
-		contractValue = "contract-" + eventID.String()
-	}
+	eventValue, contractValue := maybeCreateCampaignChainData(t, status, time.Now().UTC())
 	if _, err := testDatabase.ExecContext(
 		t.Context(),
 		`INSERT INTO campaigns (
 			id, fundraiser_id, event_id, title, short_description, story,
 			goal_amount, contract_address, end_at, image_object_key, country, zip_code,
-			deployment_status, idempotency_key
+			status, idempotency_key
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP + INTERVAL '30 days', $9, $10, $11, $12, $13)`,
 		uuid.New(),
 		fundraiserID,
@@ -566,10 +548,10 @@ func mustCreateCampaignWithDeploymentStatus(
 		"campaigns/rescue.png",
 		"Indonesia",
 		"10110",
-		deploymentStatus,
-		"active-"+keySuffix,
+		status,
+		"campaign-"+uuid.New().String(),
 	); err != nil {
-		t.Fatalf("prepare active campaign: %v", err)
+		t.Fatalf("prepare campaign: %v", err)
 	}
 }
 

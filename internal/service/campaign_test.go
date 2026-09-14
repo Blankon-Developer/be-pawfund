@@ -200,8 +200,8 @@ func TestCampaignServiceCreate(t *testing.T) {
 			if repo.campaign.ID != fixedID || repo.campaign.Title != "Emergency Rescue" || repo.campaign.ImageObjectKey != "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp" {
 				t.Errorf("repository campaign = %#v", repo.campaign)
 			}
-			if repo.campaign.Status != domain.CampaignStatusActive || repo.campaign.DeploymentStatus != domain.CampaignDeploymentStatusPending {
-				t.Errorf("repository campaign state = %q/%q", repo.campaign.Status, repo.campaign.DeploymentStatus)
+			if repo.campaign.Status != domain.CampaignStatusPending {
+				t.Errorf("repository campaign status = %q", repo.campaign.Status)
 			}
 			if !repo.minimumEndAt.Equal(fixedNow.Add(CampaignDeploymentLeadTime)) {
 				t.Errorf("minimum endAt = %v", repo.minimumEndAt)

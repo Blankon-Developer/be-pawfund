@@ -56,7 +56,7 @@ func NewCampaignHandler(
 func (h *CampaignHandler) HandleGetPublicCampaignList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
-	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query())
+	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query(), publicCampaignListStatuses)
 	if fieldErrors != nil {
 		h.ValidationError(w, fieldErrors)
 		return
@@ -323,7 +323,6 @@ func (h *CampaignHandler) HandleCreateCampaign(w http.ResponseWriter, r *http.Re
 		Country:          created.Country,
 		ZipCode:          created.ZipCode,
 		Status:           created.Status,
-		DeploymentStatus: created.DeploymentStatus,
 		ContractAddress:  created.ContractAddress,
 		CreatedAt:        created.CreatedAt.UTC().Format(time.RFC3339),
 	}
@@ -357,7 +356,7 @@ func (h *CampaignHandler) HandleGetMyCampaignList(w http.ResponseWriter, r *http
 		return
 	}
 
-	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query())
+	options, fieldErrors := campaignListOptionsFromQuery(r.URL.Query(), fundraiserCampaignListStatuses)
 	if fieldErrors != nil {
 		h.ValidationError(w, fieldErrors)
 		return
@@ -463,7 +462,6 @@ func (h *CampaignHandler) HandleGetMyCampaignDetail(w http.ResponseWriter, r *ht
 		Country:          campaign.Country,
 		ZipCode:          campaign.ZipCode,
 		Status:           campaign.Status,
-		DeploymentStatus: campaign.DeploymentStatus,
 		ContractAddress:  campaign.ContractAddress,
 		CreatedAt:        campaign.CreatedAt.UTC().Format(time.RFC3339),
 	}

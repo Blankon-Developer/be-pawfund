@@ -38,7 +38,7 @@ func TestPostgresCampaignRepositoryCreatePending(t *testing.T) {
 		if created.GoalAmount != 10_000_000_000 || created.RaisedAmount != 0 || created.DonorCount != 0 {
 			t.Errorf("created amounts = goal:%d raised:%d donors:%d", created.GoalAmount, created.RaisedAmount, created.DonorCount)
 		}
-		if created.EventID != nil || created.ContractAddress != nil || created.DeploymentStatus != domain.CampaignDeploymentStatusPending || created.Status != domain.CampaignStatusActive {
+		if created.EventID != nil || created.ContractAddress != nil || created.Status != domain.CampaignStatusPending {
 			t.Errorf("created state = %#v", created)
 		}
 		if created.CreatedAt.IsZero() {
@@ -224,7 +224,6 @@ func TestPostgresCampaignRepositoryFindPublicByContractAddress(t *testing.T) {
 		"Emergency Rescue",
 		"Help animals urgently",
 		domain.CampaignStatusCompleted,
-		domain.CampaignDeploymentStatusDeployed,
 		100,
 		90,
 		time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC),
@@ -254,24 +253,33 @@ func TestPostgresCampaignRepositoryFindPublicByContractAddress(t *testing.T) {
 		fundraiser.ID,
 		"Pending Deployment",
 		"This campaign must not be visible",
-		domain.CampaignStatusActive,
-		domain.CampaignDeploymentStatusPending,
+		domain.CampaignStatusPending,
 		100,
 		0,
 		time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC),
 	)
 	const hiddenAddress = "0xPendingCampaign"
-	if _, err := testDatabase.ExecContext(
-		t.Context(),
-		`UPDATE campaigns SET contract_address = $1 WHERE id = $2`,
-		hiddenAddress,
-		hiddenCampaignID,
-	); err != nil {
-		t.Fatalf("add hidden campaign address: %v", err)
-	}
+	mustAssignCampaignContractAddress(t, hiddenCampaignID, hiddenAddress)
 	_, err = campaignRepo.FindPublicByContractAddress(t.Context(), hiddenAddress)
 	if !errors.Is(err, repository.ErrCampaignNotFound) {
 		t.Errorf("pending campaign error = %v, want ErrCampaignNotFound", err)
+	}
+
+	failedCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Failed Deployment",
+		"This failed campaign must not be visible",
+		domain.CampaignStatusFailed,
+		100,
+		0,
+		time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC),
+	)
+	const failedAddress = "0xFailedCampaign"
+	mustAssignCampaignContractAddress(t, failedCampaignID, failedAddress)
+	_, err = campaignRepo.FindPublicByContractAddress(t.Context(), failedAddress)
+	if !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("failed campaign error = %v, want ErrCampaignNotFound", err)
 	}
 
 	if _, err := testDatabase.ExecContext(t.Context(), `UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, fundraiser.ID); err != nil {
@@ -305,7 +313,6 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		"Donor List Campaign",
 		"Campaign with donor aggregation",
 		domain.CampaignStatusActive,
-		domain.CampaignDeploymentStatusDeployed,
 		10_000,
 		2_100,
 		createdAt,
@@ -389,7 +396,6 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		"Empty Donor Campaign",
 		"Campaign without donors",
 		domain.CampaignStatusActive,
-		domain.CampaignDeploymentStatusDeployed,
 		10_000,
 		0,
 		createdAt.Add(time.Minute),
@@ -416,24 +422,32 @@ func TestPostgresCampaignRepositoryListPublicDonorsByContractAddress(t *testing.
 		fundraiser.ID,
 		"Hidden Campaign",
 		"Pending campaign",
-		domain.CampaignStatusActive,
-		domain.CampaignDeploymentStatusPending,
+		domain.CampaignStatusPending,
 		10_000,
 		0,
 		createdAt.Add(2*time.Minute),
 	)
 	const hiddenAddress = "0xHiddenDonorCampaign"
-	if _, err := testDatabase.ExecContext(
-		t.Context(),
-		`UPDATE campaigns SET contract_address = $1 WHERE id = $2`,
-		hiddenAddress,
-		hiddenCampaignID,
-	); err != nil {
-		t.Fatalf("set hidden campaign address: %v", err)
-	}
+	mustAssignCampaignContractAddress(t, hiddenCampaignID, hiddenAddress)
 	options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortRecent, Page: 1, PageSize: 10}
 	if _, _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), hiddenAddress, options); !errors.Is(err, repository.ErrCampaignNotFound) {
 		t.Errorf("hidden campaign error = %v, want ErrCampaignNotFound", err)
+	}
+
+	failedCampaignID := mustCreatePublicListedCampaign(
+		t,
+		fundraiser.ID,
+		"Failed Hidden Campaign",
+		"Failed campaign",
+		domain.CampaignStatusFailed,
+		10_000,
+		0,
+		createdAt.Add(3*time.Minute),
+	)
+	const failedAddress = "0xFailedHiddenDonorCampaign"
+	mustAssignCampaignContractAddress(t, failedCampaignID, failedAddress)
+	if _, _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), failedAddress, options); !errors.Is(err, repository.ErrCampaignNotFound) {
+		t.Errorf("failed campaign error = %v, want ErrCampaignNotFound", err)
 	}
 	if _, _, err := campaignRepo.ListPublicDonorsByContractAddress(t.Context(), "0xUnknown", options); !errors.Is(err, repository.ErrCampaignNotFound) {
 		t.Errorf("unknown campaign error = %v, want ErrCampaignNotFound", err)
@@ -451,8 +465,7 @@ func newPendingCampaign(endAt time.Time, idempotencyKey string) domain.Campaign 
 		ImageObjectKey:   "campaigns/rescue.png",
 		Country:          "Indonesia",
 		ZipCode:          "10110",
-		Status:           domain.CampaignStatusActive,
-		DeploymentStatus: domain.CampaignDeploymentStatusPending,
+		Status:           domain.CampaignStatusPending,
 		IdempotencyKey:   idempotencyKey,
 	}
 }

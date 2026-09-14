@@ -27,7 +27,7 @@ const publicCampaignListFromWhere = `
 		JOIN users u ON u.id = f.id
 		WHERE u.role = 'fundraiser'
 			AND u.deleted_at IS NULL
-			AND c.deployment_status = 'deployed'
+			AND c.status IN ('active', 'completed', 'cancelled')
 			AND c.contract_address IS NOT NULL
 			AND (
 				$1 = ''
@@ -69,7 +69,6 @@ func (r *PostgresCampaignRepository) ListPublic(
 			c.country,
 			c.zip_code,
 			c.status,
-			c.deployment_status,
 			c.idempotency_key,
 			f.image_object_key
 	`
@@ -124,7 +123,6 @@ func (r *PostgresCampaignRepository) FindPublicByContractAddress(
 			c.country,
 			c.zip_code,
 			c.status,
-			c.deployment_status,
 			c.idempotency_key,
 			f.name,
 			u.wallet_address,
@@ -135,7 +133,7 @@ func (r *PostgresCampaignRepository) FindPublicByContractAddress(
 		WHERE LOWER(c.contract_address) = LOWER($1)
 			AND u.role = 'fundraiser'
 			AND u.deleted_at IS NULL
-			AND c.deployment_status = 'deployed'
+			AND c.status IN ('active', 'completed', 'cancelled')
 			AND c.contract_address IS NOT NULL
 	`
 
@@ -162,7 +160,7 @@ func (r *PostgresCampaignRepository) ListPublicDonorsByContractAddress(
 		WHERE LOWER(c.contract_address) = LOWER($1)
 			AND u.role = 'fundraiser'
 			AND u.deleted_at IS NULL
-			AND c.deployment_status = 'deployed'
+			AND c.status IN ('active', 'completed', 'cancelled')
 			AND c.contract_address IS NOT NULL
 	`
 
@@ -310,7 +308,6 @@ func (r *PostgresCampaignRepository) ListForFundraiser(
 			c.country,
 			c.zip_code,
 			c.status,
-			c.deployment_status,
 			c.idempotency_key
 	`
 
@@ -397,7 +394,6 @@ func (r *PostgresCampaignRepository) FindByIDForFundraiser(
 			c.country,
 			c.zip_code,
 			c.status,
-			c.deployment_status,
 			c.idempotency_key
 		FROM campaigns c
 		JOIN fundraisers f ON f.id = c.fundraiser_id
@@ -477,10 +473,9 @@ func (r *PostgresCampaignRepository) CreatePending(
 			country,
 			zip_code,
 			status,
-			deployment_status,
 			idempotency_key
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (fundraiser_id, idempotency_key) DO NOTHING
 		RETURNING raised_amount, donor_count, created_at
 	`
@@ -498,7 +493,6 @@ func (r *PostgresCampaignRepository) CreatePending(
 		campaign.Country,
 		campaign.ZipCode,
 		campaign.Status,
-		campaign.DeploymentStatus,
 		campaign.IdempotencyKey,
 	).Scan(&campaign.RaisedAmount, &campaign.DonorCount, &campaign.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -551,7 +545,6 @@ func scanPublicCampaignListItem(scanner campaignScanner) (domain.PublicCampaignL
 		&item.Country,
 		&item.ZipCode,
 		&item.Status,
-		&item.DeploymentStatus,
 		&item.IdempotencyKey,
 		&fundraiserImageKey,
 	)
@@ -594,7 +587,6 @@ func scanPublicCampaignDetail(scanner campaignScanner) (domain.PublicCampaignDet
 		&detail.Country,
 		&detail.ZipCode,
 		&detail.Status,
-		&detail.DeploymentStatus,
 		&detail.IdempotencyKey,
 		&detail.FundraiserName,
 		&detail.FundraiserWalletAddress,
@@ -639,7 +631,6 @@ func findCampaignByIdempotencyKey(
 			country,
 			zip_code,
 			status,
-			deployment_status,
 			idempotency_key
 		FROM campaigns
 		WHERE fundraiser_id = $1 AND idempotency_key = $2
@@ -677,7 +668,6 @@ func scanCampaign(scanner campaignScanner) (domain.Campaign, error) {
 		&campaign.Country,
 		&campaign.ZipCode,
 		&campaign.Status,
-		&campaign.DeploymentStatus,
 		&campaign.IdempotencyKey,
 	)
 	if err != nil {

@@ -254,8 +254,7 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 					ImageObjectKey:   "campaigns/rescue photo.png",
 					Country:          "Indonesia",
 					ZipCode:          "10110",
-					Status:           domain.CampaignStatusActive,
-					DeploymentStatus: domain.CampaignDeploymentStatusPending,
+					Status:           domain.CampaignStatusPending,
 					CreatedAt:        createdAt,
 				},
 				err: test.serviceError,
@@ -298,7 +297,7 @@ func TestCampaignHandlerHandleCreateCampaign(t *testing.T) {
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode success data: %v", err)
 			}
-			if data.ID != campaignID.String() || data.Status != domain.CampaignStatusActive || data.DeploymentStatus != domain.CampaignDeploymentStatusPending || data.ContractAddress != nil {
+			if data.ID != campaignID.String() || data.Status != domain.CampaignStatusPending || data.ContractAddress != nil {
 				t.Errorf("response state = %#v", data)
 			}
 			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"
@@ -585,7 +584,7 @@ func TestCampaignHandlerHandleGetPublicCampaignDetail(t *testing.T) {
 		wantCalls    int
 	}{
 		{
-			name:      "returns a public deployed campaign",
+			name:      "returns a public live on-chain campaign",
 			address:   " 0xCaMpAiGn ",
 			wantHTTP:  http.StatusOK,
 			wantCode:  "CAMPAIGN_RETRIEVED",
@@ -891,7 +890,6 @@ func TestCampaignHandlerHandleGetMyCampaignDetail(t *testing.T) {
 					Country:          "Indonesia",
 					ZipCode:          "10110",
 					Status:           domain.CampaignStatusActive,
-					DeploymentStatus: domain.CampaignDeploymentStatusDeployed,
 					ContractAddress:  &contractAddress,
 					CreatedAt:        createdAt,
 				},
@@ -933,7 +931,7 @@ func TestCampaignHandlerHandleGetMyCampaignDetail(t *testing.T) {
 			if err := json.Unmarshal(decoded.Data, &data); err != nil {
 				t.Fatalf("decode success data: %v", err)
 			}
-			if data.Title != "Emergency Rescue" || data.RaisedAmount != 100_000_000 || data.Status != domain.CampaignStatusActive || data.DeploymentStatus != domain.CampaignDeploymentStatusDeployed {
+			if data.Title != "Emergency Rescue" || data.RaisedAmount != 100_000_000 || data.Status != domain.CampaignStatusActive {
 				t.Errorf("response data = %#v", data)
 			}
 			wantImageURL := "https://cdn.example.com/pawfund/campaigns/rescue%20photo.png"

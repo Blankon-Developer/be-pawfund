@@ -524,7 +524,7 @@
                           "contractAddress": { "type": "string", "nullable": true },
                           "status": {
                             "type": "string",
-                            "enum": ["active", "completed", "cancelled"]
+                            "enum": ["pending", "active", "completed", "cancelled", "failed"]
                           }
                         },
                         "required": [
@@ -580,7 +580,7 @@
           {
             "in": "query",
             "name": "filter",
-            "schema": { "type": "string", "enum": ["active", "completed", "cancelled"] }
+            "schema": { "type": "string", "enum": ["pending", "active", "completed", "cancelled", "failed"] }
           },
           {
             "in": "query",
@@ -598,10 +598,10 @@
       "post": {
         "tags": ["Fundraiser Campaigns"],
         "summary": "Create Campaign",
-        "description": "Persist a campaign deployment intent before the backend relayer creates its child contract. goalAmount uses atomic USDC units (6 decimals). Reusing the same Idempotency-Key with the same normalized payload returns the existing campaign.",
+        "description": "Persist a campaign before the backend relayer creates its child contract. goalAmount uses atomic USDC units (6 decimals). Reusing the same Idempotency-Key with the same normalized payload returns the existing campaign.",
         "responses": {
           "201": {
-            "description": "Campaign persisted with pending deployment status.",
+            "description": "Campaign persisted with pending status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -624,12 +624,11 @@
                         "imageUrl": { "type": "string", "format": "uri" },
                         "country": { "type": "string" },
                         "zipCode": { "type": "string" },
-                        "status": { "type": "string", "enum": ["active"] },
-                        "deploymentStatus": { "type": "string", "enum": ["pending"] },
+                        "status": { "type": "string", "enum": ["pending"] },
                         "contractAddress": { "type": "string", "nullable": true },
                         "createdAt": { "type": "string", "format": "date-time" }
                       },
-                      "required": ["id", "title", "shortDescription", "story", "goalAmount", "raisedAmount", "donorCount", "endAt", "imageUrl", "country", "zipCode", "status", "deploymentStatus", "contractAddress", "createdAt"]
+                      "required": ["id", "title", "shortDescription", "story", "goalAmount", "raisedAmount", "donorCount", "endAt", "imageUrl", "country", "zipCode", "status", "contractAddress", "createdAt"]
                     },
                     "errors": { "type": "object", "nullable": true }
                   },
@@ -697,7 +696,7 @@
       "get": {
         "tags": ["Public Campaigns"],
         "summary": "List Campaigns",
-        "description": "List publicly visible campaigns. Only campaigns with deployed contracts are returned. Search matches titles and short descriptions case-insensitively. Results are randomized when sortBy is omitted.",
+        "description": "List publicly visible campaigns. Only campaigns with live on-chain status (active, completed, or cancelled) are returned. Search matches titles and short descriptions case-insensitively. Results are randomized when sortBy is omitted.",
         "responses": {
           "200": {
             "description": "Campaigns retrieved successfully.",
@@ -823,8 +822,7 @@
                         "imageUrl": { "type": "string", "format": "uri", "nullable": true },
                         "country": { "type": "string" },
                         "zipCode": { "type": "string" },
-                        "status": { "type": "string", "enum": ["active", "completed", "cancelled"] },
-                        "deploymentStatus": { "type": "string", "enum": ["pending", "submitted", "deployed", "failed"] }
+                        "status": { "type": "string", "enum": ["pending", "active", "completed", "cancelled", "failed"] }
                       },
                       "required": [
                         "title",
@@ -839,8 +837,7 @@
                         "zipCode",
                         "createdAt",
                         "contractAddress",
-                        "status",
-                        "deploymentStatus"
+                        "status"
                       ]
                     },
                     "errors": { "type": "object", "nullable": true }
@@ -878,7 +875,7 @@
       "get": {
         "tags": ["Public Campaigns"],
         "summary": "Get Campaign Detail",
-		"description": "Get a deployed public campaign by its contract address. Contract address matching is case-insensitive.",
+		"description": "Get a public campaign with live on-chain status (active, completed, or cancelled) by its contract address. Contract address matching is case-insensitive.",
         "responses": {
           "200": {
 			"description": "Campaign retrieved successfully.",
@@ -946,14 +943,14 @@
               }
             }
 		  },
-		  "404": { "description": "No deployed public campaign matches the supplied contract address." },
+		  "404": { "description": "No public campaign with live on-chain status matches the supplied contract address." },
 		  "500": { "description": "An unexpected server error occurred while retrieving the campaign." }
         },
         "parameters": [
           {
             "in": "path",
             "name": "address",
-			"description": "Deployed campaign contract address. Matching is case-insensitive.",
+			"description": "Contract address of a public campaign with live on-chain status (active, completed, or cancelled). Matching is case-insensitive.",
             "schema": { "type": "string" },
             "required": true
           }
@@ -965,7 +962,7 @@
       "get": {
         "tags": ["Public Campaigns"],
         "summary": "List Campaign Donors",
-        "description": "List donors for a deployed public campaign. Donations are grouped case-insensitively by wallet address; amount is the gross aggregate donated by that wallet and donatedOn is its latest donation time. Active supporter profiles enrich the optional name and imageUrl fields.",
+        "description": "List donors for a public campaign with live on-chain status (active, completed, or cancelled). Donations are grouped case-insensitively by wallet address; amount is the gross aggregate donated by that wallet and donatedOn is its latest donation time. Active supporter profiles enrich the optional name and imageUrl fields.",
         "responses": {
           "200": {
             "description": "Campaign donors retrieved successfully.",
@@ -979,7 +976,7 @@
             }
           },
           "404": {
-            "description": "No deployed public campaign matches the supplied contract address.",
+            "description": "No public campaign with live on-chain status matches the supplied contract address.",
             "headers": {
               "Cache-Control": { "$ref": "#/components/headers/NoStoreCacheControl" }
             },
@@ -1016,7 +1013,7 @@
           {
             "in": "path",
             "name": "address",
-            "description": "Deployed campaign contract address. Matching is case-insensitive.",
+            "description": "Contract address of a public campaign with live on-chain status (active, completed, or cancelled). Matching is case-insensitive.",
             "schema": { "type": "string" },
             "required": true
           },

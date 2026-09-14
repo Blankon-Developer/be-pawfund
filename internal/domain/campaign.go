@@ -9,9 +9,11 @@ import (
 type CampaignStatus string
 
 const (
+	CampaignStatusPending   CampaignStatus = "pending"
 	CampaignStatusActive    CampaignStatus = "active"
 	CampaignStatusCompleted CampaignStatus = "completed"
 	CampaignStatusCancelled CampaignStatus = "cancelled"
+	CampaignStatusFailed    CampaignStatus = "failed"
 )
 
 type CampaignListSort string
@@ -32,15 +34,6 @@ type CampaignListOptions struct {
 	PageSize int64
 }
 
-type CampaignDeploymentStatus string
-
-const (
-	CampaignDeploymentStatusPending   CampaignDeploymentStatus = "pending"
-	CampaignDeploymentStatusSubmitted CampaignDeploymentStatus = "submitted"
-	CampaignDeploymentStatusDeployed  CampaignDeploymentStatus = "deployed"
-	CampaignDeploymentStatusFailed    CampaignDeploymentStatus = "failed"
-)
-
 type Campaign struct {
 	ID               uuid.UUID
 	FundraiserID     uuid.UUID
@@ -58,7 +51,6 @@ type Campaign struct {
 	Country          string
 	ZipCode          string
 	Status           CampaignStatus
-	DeploymentStatus CampaignDeploymentStatus
 	IdempotencyKey   string
 }
 

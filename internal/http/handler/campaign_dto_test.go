@@ -152,6 +152,15 @@ func TestCampaignListOptionsFromQuery(t *testing.T) {
 			},
 		},
 		{
+			name: "rejects pending as a public list filter",
+			query: url.Values{
+				"filter": {"pending"},
+			},
+			wantErrors: httpx.FieldErrors{
+				"filter": {"filter must be one of active, completed, or cancelled!"},
+			},
+		},
+		{
 			name: "rejects invalid query parameters",
 			query: url.Values{
 				"sortBy":   {"popular"},
@@ -179,7 +188,62 @@ func TestCampaignListOptionsFromQuery(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gotOptions, gotErrors := campaignListOptionsFromQuery(test.query)
+			gotOptions, gotErrors := campaignListOptionsFromQuery(test.query, publicCampaignListStatuses)
+			if !reflect.DeepEqual(gotErrors, test.wantErrors) {
+				t.Errorf("errors = %#v, want %#v", gotErrors, test.wantErrors)
+			}
+			if test.wantErrors == nil && !reflect.DeepEqual(gotOptions, test.wantOptions) {
+				t.Errorf("options = %#v, want %#v", gotOptions, test.wantOptions)
+			}
+		})
+	}
+}
+
+func TestFundraiserCampaignListOptionsFromQuery(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       url.Values
+		wantOptions domain.CampaignListOptions
+		wantErrors  httpx.FieldErrors
+	}{
+		{
+			name: "accepts pending and failed filters",
+			query: url.Values{
+				"filter": {" pending "},
+			},
+			wantOptions: domain.CampaignListOptions{
+				Sort:     domain.CampaignListSortNewest,
+				Status:   campaignStatusPointer(domain.CampaignStatusPending),
+				Page:     1,
+				PageSize: 10,
+			},
+		},
+		{
+			name: "accepts failed filter",
+			query: url.Values{
+				"filter": {"failed"},
+			},
+			wantOptions: domain.CampaignListOptions{
+				Sort:     domain.CampaignListSortNewest,
+				Status:   campaignStatusPointer(domain.CampaignStatusFailed),
+				Page:     1,
+				PageSize: 10,
+			},
+		},
+		{
+			name: "rejects unknown fundraiser filters",
+			query: url.Values{
+				"filter": {"submitted"},
+			},
+			wantErrors: httpx.FieldErrors{
+				"filter": {"filter must be one of pending, active, completed, cancelled, or failed!"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotOptions, gotErrors := campaignListOptionsFromQuery(test.query, fundraiserCampaignListStatuses)
 			if !reflect.DeepEqual(gotErrors, test.wantErrors) {
 				t.Errorf("errors = %#v, want %#v", gotErrors, test.wantErrors)
 			}

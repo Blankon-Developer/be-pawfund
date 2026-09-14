@@ -85,38 +85,36 @@ func (r createCampaignRequest) validate() (httpx.FieldErrors, time.Time) {
 }
 
 type createCampaignResponse struct {
-	ID               string                          `json:"id"`
-	Title            string                          `json:"title"`
-	ShortDescription string                          `json:"shortDescription"`
-	Story            string                          `json:"story"`
-	GoalAmount       int64                           `json:"goalAmount"`
-	RaisedAmount     int64                           `json:"raisedAmount"`
-	DonorCount       int64                           `json:"donorCount"`
-	EndAt            string                          `json:"endAt"`
-	ImageURL         *string                         `json:"imageUrl"`
-	Country          string                          `json:"country"`
-	ZipCode          string                          `json:"zipCode"`
-	Status           domain.CampaignStatus           `json:"status"`
-	DeploymentStatus domain.CampaignDeploymentStatus `json:"deploymentStatus"`
-	ContractAddress  *string                         `json:"contractAddress"`
-	CreatedAt        string                          `json:"createdAt"`
+	ID               string                `json:"id"`
+	Title            string                `json:"title"`
+	ShortDescription string                `json:"shortDescription"`
+	Story            string                `json:"story"`
+	GoalAmount       int64                 `json:"goalAmount"`
+	RaisedAmount     int64                 `json:"raisedAmount"`
+	DonorCount       int64                 `json:"donorCount"`
+	EndAt            string                `json:"endAt"`
+	ImageURL         *string               `json:"imageUrl"`
+	Country          string                `json:"country"`
+	ZipCode          string                `json:"zipCode"`
+	Status           domain.CampaignStatus `json:"status"`
+	ContractAddress  *string               `json:"contractAddress"`
+	CreatedAt        string                `json:"createdAt"`
 }
 
 type myCampaignResponse struct {
-	Title            string                          `json:"title"`
-	ShortDescription string                          `json:"shortDescription"`
-	Story            string                          `json:"story"`
-	GoalAmount       int64                           `json:"goalAmount"`
-	RaisedAmount     int64                           `json:"raisedAmount"`
-	DonorCount       int64                           `json:"donorCount"`
-	EndAt            string                          `json:"endAt"`
-	ImageURL         *string                         `json:"imageUrl"`
-	Country          string                          `json:"country"`
-	ZipCode          string                          `json:"zipCode"`
-	Status           domain.CampaignStatus           `json:"status"`
-	DeploymentStatus domain.CampaignDeploymentStatus `json:"deploymentStatus"`
-	ContractAddress  *string                         `json:"contractAddress"`
-	CreatedAt        string                          `json:"createdAt"`
+	Title            string                `json:"title"`
+	ShortDescription string                `json:"shortDescription"`
+	Story            string                `json:"story"`
+	GoalAmount       int64                 `json:"goalAmount"`
+	RaisedAmount     int64                 `json:"raisedAmount"`
+	DonorCount       int64                 `json:"donorCount"`
+	EndAt            string                `json:"endAt"`
+	ImageURL         *string               `json:"imageUrl"`
+	Country          string                `json:"country"`
+	ZipCode          string                `json:"zipCode"`
+	Status           domain.CampaignStatus `json:"status"`
+	ContractAddress  *string               `json:"contractAddress"`
+	CreatedAt        string                `json:"createdAt"`
 }
 
 type myCampaignListItemResponse struct {
@@ -133,7 +131,22 @@ type myCampaignListItemResponse struct {
 	Status           domain.CampaignStatus `json:"status"`
 }
 
-func campaignListOptionsFromQuery(query url.Values) (domain.CampaignListOptions, httpx.FieldErrors) {
+var (
+	publicCampaignListStatuses = []domain.CampaignStatus{
+		domain.CampaignStatusActive,
+		domain.CampaignStatusCompleted,
+		domain.CampaignStatusCancelled,
+	}
+	fundraiserCampaignListStatuses = []domain.CampaignStatus{
+		domain.CampaignStatusPending,
+		domain.CampaignStatusActive,
+		domain.CampaignStatusCompleted,
+		domain.CampaignStatusCancelled,
+		domain.CampaignStatusFailed,
+	}
+)
+
+func campaignListOptionsFromQuery(query url.Values, allowedStatuses []domain.CampaignStatus) (domain.CampaignListOptions, httpx.FieldErrors) {
 	options := domain.CampaignListOptions{
 		Search:   strings.TrimSpace(query.Get("search")),
 		Sort:     domain.CampaignListSortNewest,
@@ -158,13 +171,13 @@ func campaignListOptionsFromQuery(query url.Values) (domain.CampaignListOptions,
 	}
 
 	if rawFilter, ok := query["filter"]; ok {
-		switch filter := strings.TrimSpace(firstQueryValue(rawFilter)); filter {
-		case "":
-		case string(domain.CampaignStatusActive), string(domain.CampaignStatusCompleted), string(domain.CampaignStatusCancelled):
-			status := domain.CampaignStatus(filter)
-			options.Status = &status
-		default:
-			fieldErrors.Add("filter", "filter must be one of active, completed, or cancelled!")
+		filter := strings.TrimSpace(firstQueryValue(rawFilter))
+		if filter != "" {
+			if status, ok := campaignStatusFromAllowed(filter, allowedStatuses); ok {
+				options.Status = &status
+			} else {
+				fieldErrors.Add("filter", campaignListFilterError(allowedStatuses))
+			}
 		}
 	}
 
@@ -194,6 +207,32 @@ func campaignListOptionsFromQuery(query url.Values) (domain.CampaignListOptions,
 		return options, nil
 	}
 	return domain.CampaignListOptions{}, fieldErrors
+}
+
+func campaignStatusFromAllowed(filter string, allowed []domain.CampaignStatus) (domain.CampaignStatus, bool) {
+	for _, status := range allowed {
+		if filter == string(status) {
+			return status, true
+		}
+	}
+	return "", false
+}
+
+func campaignListFilterError(allowed []domain.CampaignStatus) string {
+	if len(allowed) == 0 {
+		return "filter is invalid!"
+	}
+	if len(allowed) == 1 {
+		return "filter must be " + string(allowed[0]) + "!"
+	}
+	names := make([]string, 0, len(allowed))
+	for _, status := range allowed {
+		names = append(names, string(status))
+	}
+	if len(names) == 2 {
+		return "filter must be one of " + names[0] + " or " + names[1] + "!"
+	}
+	return "filter must be one of " + strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1] + "!"
 }
 
 func firstQueryValue(values []string) string {

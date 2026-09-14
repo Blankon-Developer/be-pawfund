@@ -542,11 +542,11 @@ func mustCreateDonationCampaign(t *testing.T, fundraiserID uuid.UUID, title stri
 		`INSERT INTO campaigns (
 			id, fundraiser_id, event_id, title, short_description, story,
 			goal_amount, contract_address, end_at, image_object_key, country,
-			zip_code, deployment_status, idempotency_key
+			zip_code, status, idempotency_key
 		) VALUES (
 			$1, $2, $3, $4, 'Help animals urgently', 'Campaign story.',
 			100000000, $5, CURRENT_TIMESTAMP + INTERVAL '30 days',
-			'campaigns/donation-campaign.png', 'Indonesia', '10110', 'deployed', $6
+			'campaigns/donation-campaign.png', 'Indonesia', '10110', 'active', $6
 		)`,
 		campaignID,
 		fundraiserID,

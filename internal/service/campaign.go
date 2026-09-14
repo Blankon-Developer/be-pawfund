@@ -156,8 +156,7 @@ func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput)
 		ImageObjectKey:   imageObjectKey,
 		Country:          strings.TrimSpace(input.Country),
 		ZipCode:          strings.TrimSpace(input.ZipCode),
-		Status:           domain.CampaignStatusActive,
-		DeploymentStatus: domain.CampaignDeploymentStatusPending,
+		Status:           domain.CampaignStatusPending,
 		IdempotencyKey:   strings.TrimSpace(input.IdempotencyKey),
 	}
 
