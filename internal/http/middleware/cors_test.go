@@ -69,7 +69,7 @@ func TestCORS(t *testing.T) {
 			}
 			if test.method == http.MethodOptions {
 				request.Header.Set("Access-Control-Request-Method", http.MethodPost)
-				request.Header.Set("Access-Control-Request-Headers", "authorization,content-type,x-request-id")
+				request.Header.Set("Access-Control-Request-Headers", "authorization,content-type,idempotency-key,x-request-id")
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
