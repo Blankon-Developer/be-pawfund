@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
 
   minio-test:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     profiles: ["test"]
     user: root
     command: server /data
@@ -82,7 +82,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl --fail --silent http://localhost:9000/minio/health/live >/dev/null",
+          "wget --quiet --spider http://localhost:9000/minio/health/live",
         ]
       interval: 2s
       timeout: 5s
