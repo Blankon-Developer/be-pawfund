@@ -104,6 +104,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize queue: %w", err))
 	}
+	if err := queue.DeclareOn(queueClient, CampaignDeploymentTopology()); err != nil {
+		return fail(fmt.Errorf("app: declare campaign deployment topology: %w", err))
+	}
+	deploymentPublisher := NewCampaignDeploymentPublisher(queueClient)
 
 	supporterRepository := database.NewPostgresSupporterRepository(db)
 	fundraiserRepository := database.NewPostgresFundraiserRepository(db)
@@ -112,7 +116,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter, objectPromoter)
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter, objectPromoter)
-	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7, objectPromoter)
+	campaignService := service.NewCampaignService(campaignRepository, uuid.NewV7, objectPromoter, deploymentPublisher, cfg.SIWEChainID)
 	authService := service.NewAuthService(
 		cacheClient,
 		authRepository,

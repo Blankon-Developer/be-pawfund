@@ -1,6 +1,9 @@
 package queue
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDeclareRejectsEmptyTopology(t *testing.T) {
 	err := Declare(nil, Topology{})
@@ -33,6 +36,26 @@ func TestDeclareAllowsExclusiveTransientQueue(t *testing.T) {
 	}
 	if got, want := err.Error(), "queue: declare: channel is required"; got != want {
 		t.Fatalf("Declare() error = %q, want %q", got, want)
+	}
+}
+
+func TestDeclareOnRequiresClient(t *testing.T) {
+	err := DeclareOn(nil, Topology{Queue: "jobs", Durable: true})
+	if err == nil {
+		t.Fatal("DeclareOn() expected error for nil client")
+	}
+	if !strings.Contains(err.Error(), "client is required") {
+		t.Fatalf("DeclareOn() error = %v, want client required", err)
+	}
+}
+
+func TestDeclareOnRequiresConnection(t *testing.T) {
+	err := DeclareOn(&QueueClient{}, Topology{Queue: "jobs", Durable: true})
+	if err == nil {
+		t.Fatal("DeclareOn() expected error when connection is missing")
+	}
+	if !strings.Contains(err.Error(), "connection is not available") {
+		t.Fatalf("DeclareOn() error = %v, want connection not available", err)
 	}
 }
 

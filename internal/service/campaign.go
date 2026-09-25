@@ -33,26 +33,48 @@ type CreateCampaignInput struct {
 	ZipCode          string
 }
 
+// CampaignDeploymentTask is the deployment work item published after a campaign
+// is stored. The deployer treats CampaignID as its idempotency key.
+type CampaignDeploymentTask struct {
+	CampaignID       uuid.UUID
+	FundraiserID     uuid.UUID
+	FundraiserWallet string
+	GoalAmount       int64
+	EndAt            time.Time
+	ChainID          int
+}
+
+// CampaignDeploymentPublisher enqueues a campaign deployment task.
+type CampaignDeploymentPublisher interface {
+	PublishCampaignDeployment(ctx context.Context, task CampaignDeploymentTask) error
+}
+
 type CampaignService struct {
-	repository     repository.CampaignRepository
-	generateID     IDGenerator
-	objectPromoter ObjectPromoter
-	now            func() time.Time
+	repository          repository.CampaignRepository
+	generateID          IDGenerator
+	objectPromoter      ObjectPromoter
+	deploymentPublisher CampaignDeploymentPublisher
+	chainID             int
+	now                 func() time.Time
 }
 
 func NewCampaignService(
 	repo repository.CampaignRepository,
 	generateID IDGenerator,
 	objectPromoter ObjectPromoter,
+	deploymentPublisher CampaignDeploymentPublisher,
+	chainID int,
 ) *CampaignService {
 	if generateID == nil {
 		generateID = uuid.NewV7
 	}
 	return &CampaignService{
-		repository:     repo,
-		generateID:     generateID,
-		objectPromoter: objectPromoter,
-		now:            time.Now,
+		repository:          repo,
+		generateID:          generateID,
+		objectPromoter:      objectPromoter,
+		deploymentPublisher: deploymentPublisher,
+		chainID:             chainID,
+		now:                 time.Now,
 	}
 }
 
@@ -179,6 +201,45 @@ func (s *CampaignService) Create(ctx context.Context, input CreateCampaignInput)
 		}
 	}
 
+	// Drop staging before publish. A failed publish still leaves the saved campaign retryable.
 	discardStagingImage(ctx, s.objectPromoter, &stagingKey)
+	if err := s.publishCampaignDeployment(ctx, strings.TrimSpace(input.WalletAddress), created); err != nil {
+		return domain.Campaign{}, err
+	}
 	return created, nil
+}
+
+func (s *CampaignService) publishCampaignDeployment(ctx context.Context, walletAddress string, campaign domain.Campaign) error {
+	if !needsCampaignDeployment(campaign) {
+		return nil
+	}
+	if s.chainID <= 0 {
+		return fmt.Errorf("service: publish campaign deployment %s: chain ID is required", campaign.ID)
+	}
+	if s.deploymentPublisher == nil {
+		return fmt.Errorf("service: publish campaign deployment %s: publisher is required", campaign.ID)
+	}
+
+	err := s.deploymentPublisher.PublishCampaignDeployment(ctx, CampaignDeploymentTask{
+		CampaignID:       campaign.ID,
+		FundraiserID:     campaign.FundraiserID,
+		FundraiserWallet: walletAddress,
+		GoalAmount:       campaign.GoalAmount,
+		EndAt:            campaign.EndAt.UTC(),
+		ChainID:          s.chainID,
+	})
+	if err != nil {
+		return fmt.Errorf("service: publish campaign deployment %s: %w", campaign.ID, err)
+	}
+	return nil
+}
+
+func needsCampaignDeployment(campaign domain.Campaign) bool {
+	if campaign.Status != domain.CampaignStatusPending {
+		return false
+	}
+	if campaign.ContractAddress == nil {
+		return true
+	}
+	return strings.TrimSpace(*campaign.ContractAddress) == ""
 }

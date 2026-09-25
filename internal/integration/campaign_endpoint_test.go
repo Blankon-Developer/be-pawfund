@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -20,11 +21,14 @@ import (
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/routes"
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/queue"
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/storage"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 )
+
+const campaignIntegrationChainID = 84532
 
 func TestCreateCampaignEndpoint(t *testing.T) {
 	cleanDatabase(t)
@@ -49,6 +53,13 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 		removeIntegrationObject(t, canonicalImageKey)
 	})
 	validBody := `{"title":"Emergency Rescue","shortDescription":"Help rescued animals","story":"A long rescue story.","goalAmount":10000000000,"endAt":"` + endAt.Format(time.RFC3339) + `","imageObjectKey":"` + stagingImageKey + `","country":"Indonesia","zipCode":"10110"}`
+
+	deploymentTopology := app.CampaignDeploymentTopology()
+	deploymentQueue := openTestQueueClient(t, "")
+	if err := queue.DeclareOn(deploymentQueue, deploymentTopology); err != nil {
+		t.Fatalf("declare campaign deployment topology: %v", err)
+	}
+	purgeQueue(t, deploymentQueue, deploymentTopology.Queue)
 
 	first := requestCreateCampaign(t, router, fundraiserToken, "create-rescue-1", validBody)
 	if first.Code != http.StatusCreated {
@@ -142,6 +153,32 @@ func TestCreateCampaignEndpoint(t *testing.T) {
 	result = decodeAuthEndpointResult(t, notFound)
 	if result.HTTPStatus != http.StatusNotFound || result.Code != "PROFILE_NOT_FOUND" {
 		t.Errorf("stale fundraiser create = %d/%q; body: %s", result.HTTPStatus, result.Code, result.Body)
+	}
+
+	deliveries := collectQueueDeliveries(t, deploymentQueue, deploymentTopology.Queue, 2)
+	if string(deliveries[0].Body) != string(deliveries[1].Body) {
+		t.Fatalf("replay body = %s, want %s", deliveries[1].Body, deliveries[0].Body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(deliveries[0].Body, &payload); err != nil {
+		t.Fatalf("decode deployment task: %v", err)
+	}
+	if len(payload) != 6 {
+		t.Fatalf("deployment fields = %#v", payload)
+	}
+	var task struct {
+		CampaignID       string `json:"campaignId"`
+		FundraiserID     string `json:"fundraiserId"`
+		FundraiserWallet string `json:"fundraiserWallet"`
+		GoalAmount       int64  `json:"goalAmount"`
+		EndAt            string `json:"endAt"`
+		ChainID          int    `json:"chainId"`
+	}
+	if err := json.Unmarshal(deliveries[0].Body, &task); err != nil {
+		t.Fatalf("decode deployment task: %v", err)
+	}
+	if task.CampaignID != firstEnvelope.Data.ID || task.FundraiserID != fundraiser.ID.String() || task.FundraiserWallet != walletAddress || task.GoalAmount != 10_000_000_000 || task.EndAt != endAt.Format(time.RFC3339) || task.ChainID != campaignIntegrationChainID {
+		t.Fatalf("deployment task = %#v", task)
 	}
 }
 
@@ -766,12 +803,84 @@ func newCampaignIntegrationRouter(t *testing.T) (http.Handler, *auth.JWTManager)
 		t.Fatalf("create public URL builder: %v", err)
 	}
 	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
-	campaignService := service.NewCampaignService(campaignRepo, uuid.NewV7, newIntegrationObjectPromoter(t))
+	queueClient, err := queue.Open(t.Context(), queue.Config{URL: testQueueURL})
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := queueClient.Close(); err != nil {
+			t.Errorf("close queue: %v", err)
+		}
+	})
+	if err := queue.DeclareOn(queueClient, app.CampaignDeploymentTopology()); err != nil {
+		t.Fatalf("declare campaign deployment topology: %v", err)
+	}
+	campaignService := service.NewCampaignService(
+		campaignRepo,
+		uuid.NewV7,
+		newIntegrationObjectPromoter(t),
+		app.NewCampaignDeploymentPublisher(queueClient),
+		campaignIntegrationChainID,
+	)
 	application := &app.Application{
 		CampaignHandler: handler.NewCampaignHandler(campaignService, urlBuilder, logger),
 		Authenticate:    appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager
+}
+
+func purgeQueue(t *testing.T, client *queue.QueueClient, queueName string) {
+	t.Helper()
+	conn := client.Conn()
+	if conn == nil || conn.IsClosed() {
+		t.Fatal("queue connection is not available")
+	}
+	channel, err := conn.Channel()
+	if err != nil {
+		t.Fatalf("open channel: %v", err)
+	}
+	defer channel.Close()
+	if _, err := channel.QueuePurge(queueName, false); err != nil {
+		t.Fatalf("purge queue %s: %v", queueName, err)
+	}
+}
+
+func collectQueueDeliveries(t *testing.T, client *queue.QueueClient, queueName string, want int) []queue.Delivery {
+	t.Helper()
+	consumer, err := queue.NewConsumer(client, queue.ConsumerConfig{Queue: queueName})
+	if err != nil {
+		t.Fatalf("NewConsumer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	got := make(chan queue.Delivery, want+1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- consumer.Run(ctx, func(_ context.Context, delivery queue.Delivery) error {
+			got <- delivery
+			return nil
+		})
+	}()
+
+	deliveries := make([]queue.Delivery, 0, want)
+	deadline := time.After(10 * time.Second)
+	for len(deliveries) < want {
+		select {
+		case delivery := <-got:
+			deliveries = append(deliveries, delivery)
+		case <-deadline:
+			t.Fatalf("got %d deliveries, want %d", len(deliveries), want)
+		}
+	}
+	select {
+	case extra := <-got:
+		t.Fatalf("unexpected delivery: %s", extra.Body)
+	case <-time.After(time.Second):
+	}
+	cancel()
+	waitConsumerStop(t, errCh)
+	return deliveries
 }
 
 func requestCreateCampaign(

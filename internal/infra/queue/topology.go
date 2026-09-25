@@ -22,6 +22,25 @@ type Topology struct {
 	AutoDelete   bool
 }
 
+// DeclareOn declares topology on a short-lived channel from client.
+// It does not keep the channel open across a reconnect.
+func DeclareOn(client *QueueClient, topology Topology) error {
+	if client == nil {
+		return fmt.Errorf("queue: declare: client is required")
+	}
+	conn := client.Conn()
+	if conn == nil || conn.IsClosed() {
+		return fmt.Errorf("queue: declare: connection is not available")
+	}
+
+	channel, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("queue: declare: %w", err)
+	}
+	defer channel.Close()
+	return Declare(channel, topology)
+}
+
 // Declare declares the exchange and/or queue on ch and binds them when both
 // are set. It does not open or close connections.
 func Declare(ch *amqp.Channel, t Topology) error {

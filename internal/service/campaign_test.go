@@ -13,6 +13,18 @@ import (
 	"github.com/google/uuid"
 )
 
+const testCampaignChainID = 84532
+
+type campaignDeploymentPublisherStub struct {
+	tasks []CampaignDeploymentTask
+	err   error
+}
+
+func (s *campaignDeploymentPublisherStub) PublishCampaignDeployment(_ context.Context, task CampaignDeploymentTask) error {
+	s.tasks = append(s.tasks, task)
+	return s.err
+}
+
 type campaignRepositoryStub struct {
 	created           domain.Campaign
 	err               error
@@ -157,12 +169,13 @@ func TestCampaignServiceCreate(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &campaignRepositoryStub{err: test.repositoryError}
+			publisher := &campaignDeploymentPublisherStub{}
 			campaignService := NewCampaignService(repo, func() (uuid.UUID, error) {
 				if test.idError != nil {
 					return uuid.Nil, test.idError
 				}
 				return fixedID, nil
-			}, nil)
+			}, nil, publisher, testCampaignChainID)
 			campaignService.now = func() time.Time { return fixedNow }
 
 			created, err := campaignService.Create(t.Context(), CreateCampaignInput{
@@ -190,6 +203,12 @@ func TestCampaignServiceCreate(t *testing.T) {
 			}
 			if (repo.calls > 0) != test.wantRepositoryCall {
 				t.Errorf("repository calls = %d, want called = %v", repo.calls, test.wantRepositoryCall)
+			}
+			if test.wantError == nil && len(publisher.tasks) != 1 {
+				t.Errorf("deployment publishes = %d, want 1", len(publisher.tasks))
+			}
+			if test.wantError != nil && len(publisher.tasks) != 0 {
+				t.Errorf("deployment publishes = %d, want 0", len(publisher.tasks))
 			}
 			if !test.wantRepositoryCall {
 				return
@@ -219,15 +238,18 @@ func TestCampaignServiceCreateImageObjectKey(t *testing.T) {
 	stagingKey := "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
 	canonicalKey := "campaigns/0198a123-4567-7abc-8123-456789abcdef.webp"
 
+	publishFailure := errors.New("broker unavailable")
 	tests := []struct {
 		name               string
 		imageObjectKey     string
 		promoteError       error
 		repositoryError    error
+		publishError       error
 		wantError          error
 		wantPromote        bool
 		wantDiscard        bool
 		wantRepositoryCall bool
+		wantPublish        bool
 	}{
 		{
 			name:               "promotes staged campaign image before persist then discards staging",
@@ -235,6 +257,7 @@ func TestCampaignServiceCreateImageObjectKey(t *testing.T) {
 			wantPromote:        true,
 			wantDiscard:        true,
 			wantRepositoryCall: true,
+			wantPublish:        true,
 		},
 		{
 			name:           "rejects canonical campaign key",
@@ -256,15 +279,26 @@ func TestCampaignServiceCreateImageObjectKey(t *testing.T) {
 			wantPromote:        true,
 			wantRepositoryCall: true,
 		},
+		{
+			name:               "discards staging when deployment publish fails",
+			imageObjectKey:     stagingKey,
+			publishError:       publishFailure,
+			wantError:          publishFailure,
+			wantPromote:        true,
+			wantDiscard:        true,
+			wantRepositoryCall: true,
+			wantPublish:        true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			promoter := &stubObjectPromoter{err: test.promoteError}
 			repo := &campaignRepositoryStub{err: test.repositoryError}
+			publisher := &campaignDeploymentPublisherStub{err: test.publishError}
 			campaignService := NewCampaignService(repo, func() (uuid.UUID, error) {
 				return fixedID, nil
-			}, promoter)
+			}, promoter, publisher, testCampaignChainID)
 			campaignService.now = func() time.Time { return fixedNow }
 
 			_, err := campaignService.Create(t.Context(), CreateCampaignInput{
@@ -301,6 +335,12 @@ func TestCampaignServiceCreateImageObjectKey(t *testing.T) {
 			if test.wantRepositoryCall && repo.campaign.ImageObjectKey != canonicalKey {
 				t.Errorf("persisted key = %q, want %q", repo.campaign.ImageObjectKey, canonicalKey)
 			}
+			if test.wantPublish != (len(publisher.tasks) == 1) {
+				t.Errorf("deployment publishes = %d, want publish = %v", len(publisher.tasks), test.wantPublish)
+			}
+			if test.publishError != nil && (err == nil || !strings.Contains(err.Error(), "publish campaign deployment "+fixedID.String())) {
+				t.Errorf("Create() error = %v, want publish context for %s", err, fixedID)
+			}
 		})
 	}
 }
@@ -325,7 +365,7 @@ func TestCampaignServiceListMyCampaigns(t *testing.T) {
 				listTotal: 47,
 				listErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil, nil)
+			campaignService := NewCampaignService(repo, nil, nil, nil, testCampaignChainID)
 			options := domain.CampaignListOptions{
 				Search:   " rescue ",
 				Sort:     domain.CampaignListSortMostDonated,
@@ -375,7 +415,7 @@ func TestCampaignServiceListPublicCampaigns(t *testing.T) {
 				publicListTotal: 47,
 				publicListErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil, nil)
+			campaignService := NewCampaignService(repo, nil, nil, nil, testCampaignChainID)
 			options := domain.CampaignListOptions{
 				Search:   " rescue ",
 				Sort:     domain.CampaignListSortRandom,
@@ -424,7 +464,7 @@ func TestCampaignServiceGetPublicCampaignDetail(t *testing.T) {
 				publicRetrieved: domain.PublicCampaignDetail{Campaign: domain.Campaign{Title: "Emergency Rescue"}},
 				publicFindErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil, nil)
+			campaignService := NewCampaignService(repo, nil, nil, nil, testCampaignChainID)
 
 			campaign, err := campaignService.GetPublicCampaignDetail(t.Context(), " 0xCaMpAiGn ")
 
@@ -468,7 +508,7 @@ func TestCampaignServiceListPublicCampaignDonors(t *testing.T) {
 				publicDonorsTotal: 47,
 				publicDonorsErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil, nil)
+			campaignService := NewCampaignService(repo, nil, nil, nil, testCampaignChainID)
 			options := domain.CampaignDonorListOptions{Sort: domain.CampaignDonorListSortTop, Page: 2, PageSize: 25}
 
 			donors, total, err := campaignService.ListPublicCampaignDonors(t.Context(), " 0xCaMpAiGn ", options)
@@ -513,7 +553,7 @@ func TestCampaignServiceGetMyCampaignDetail(t *testing.T) {
 				retrieved: domain.Campaign{ID: campaignID, Title: "Emergency Rescue"},
 				findErr:   test.repositoryError,
 			}
-			campaignService := NewCampaignService(repo, nil, nil)
+			campaignService := NewCampaignService(repo, nil, nil, nil, testCampaignChainID)
 
 			campaign, err := campaignService.GetMyCampaignDetail(t.Context(), " 0xFundraiser ", campaignID)
 
@@ -539,7 +579,7 @@ func TestCampaignServiceGetMyCampaignDetail(t *testing.T) {
 
 func TestCampaignServiceNormalizesEndAtToPostgresPrecision(t *testing.T) {
 	repo := &campaignRepositoryStub{}
-	campaignService := NewCampaignService(repo, func() (uuid.UUID, error) { return uuid.New(), nil }, nil)
+	campaignService := NewCampaignService(repo, func() (uuid.UUID, error) { return uuid.New(), nil }, nil, &campaignDeploymentPublisherStub{}, testCampaignChainID)
 	fixedNow := time.Date(2026, 8, 10, 4, 0, 0, 123456789, time.UTC)
 	campaignService.now = func() time.Time { return fixedNow }
 	inputEndAt := fixedNow.Add(24 * time.Hour)
@@ -562,5 +602,116 @@ func TestCampaignServiceNormalizesEndAtToPostgresPrecision(t *testing.T) {
 	want := inputEndAt.Truncate(time.Microsecond)
 	if !repo.campaign.EndAt.Equal(want) || repo.campaign.EndAt.Nanosecond()%1000 != 0 {
 		t.Errorf("normalized endAt = %v, want %v", repo.campaign.EndAt, want)
+	}
+}
+
+func TestCampaignServiceCreatePublishesStoredCampaign(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	fundraiserID := uuid.MustParse("0198b123-4567-7abc-8123-456789abcdef")
+	endAt := time.Date(2026, 10, 25, 4, 0, 0, 0, time.UTC)
+	contractAddress := "0xCampaign"
+	blankContract := "  "
+
+	tests := []struct {
+		name        string
+		status      domain.CampaignStatus
+		contract    *string
+		wantPublish bool
+	}{
+		{name: "publishes a pending campaign without a contract", status: domain.CampaignStatusPending, wantPublish: true},
+		{name: "publishes a pending campaign with a blank contract", status: domain.CampaignStatusPending, contract: &blankContract, wantPublish: true},
+		{name: "skips a pending campaign that already has a contract", status: domain.CampaignStatusPending, contract: &contractAddress},
+		{name: "skips an active campaign", status: domain.CampaignStatusActive},
+		{name: "skips a failed campaign", status: domain.CampaignStatusFailed},
+		{name: "skips a completed campaign", status: domain.CampaignStatusCompleted},
+		{name: "skips a cancelled campaign", status: domain.CampaignStatusCancelled},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := &campaignRepositoryStub{created: domain.Campaign{
+				ID:              campaignID,
+				FundraiserID:    fundraiserID,
+				GoalAmount:      10_000_000_000,
+				EndAt:           endAt,
+				Status:          test.status,
+				ContractAddress: test.contract,
+			}}
+			publisher := &campaignDeploymentPublisherStub{}
+			campaignService := NewCampaignService(repo, func() (uuid.UUID, error) {
+				return uuid.MustParse("0198c123-4567-7abc-8123-456789abcdef"), nil
+			}, nil, publisher, testCampaignChainID)
+
+			created, err := campaignService.Create(t.Context(), CreateCampaignInput{
+				WalletAddress:    " 0xFundraiserChecksum ",
+				IdempotencyKey:   "create-rescue-1",
+				Title:            "Emergency Rescue",
+				ShortDescription: "Help rescued animals",
+				Story:            "A long rescue story.",
+				GoalAmount:       1,
+				EndAt:            endAt.Add(time.Hour),
+				ImageObjectKey:   "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp",
+				Country:          "Indonesia",
+				ZipCode:          "10110",
+			})
+			if err != nil {
+				t.Fatalf("Create() unexpected error: %v", err)
+			}
+			if created.ID != campaignID {
+				t.Fatalf("created ID = %s, want stored campaign", created.ID)
+			}
+			if !test.wantPublish {
+				if len(publisher.tasks) != 0 {
+					t.Fatalf("deployment publishes = %d, want 0", len(publisher.tasks))
+				}
+				return
+			}
+			if len(publisher.tasks) != 1 {
+				t.Fatalf("deployment publishes = %d, want 1", len(publisher.tasks))
+			}
+			task := publisher.tasks[0]
+			if task.CampaignID != campaignID || task.FundraiserID != fundraiserID || task.FundraiserWallet != "0xFundraiserChecksum" || task.GoalAmount != 10_000_000_000 || !task.EndAt.Equal(endAt) || task.ChainID != testCampaignChainID {
+				t.Fatalf("task = %#v", task)
+			}
+		})
+	}
+}
+
+func TestCampaignServiceCreatePublishRequiresPublisherAndChain(t *testing.T) {
+	campaignID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")
+	stored := domain.Campaign{
+		ID:         campaignID,
+		Status:     domain.CampaignStatusPending,
+		GoalAmount: 1,
+		EndAt:      time.Date(2026, 10, 25, 4, 0, 0, 0, time.UTC),
+	}
+	input := CreateCampaignInput{
+		WalletAddress:    "0xFundraiser",
+		IdempotencyKey:   "create-rescue-1",
+		Title:            "Emergency Rescue",
+		ShortDescription: "Help rescued animals",
+		Story:            "A long rescue story.",
+		GoalAmount:       1,
+		EndAt:            stored.EndAt,
+		ImageObjectKey:   "tmp/campaigns/0198a123-4567-7abc-8123-456789abcdef.webp",
+		Country:          "Indonesia",
+		ZipCode:          "10110",
+	}
+	generateID := func() (uuid.UUID, error) { return campaignID, nil }
+
+	publisher := &campaignDeploymentPublisherStub{}
+	missingPublisher := NewCampaignService(&campaignRepositoryStub{created: stored}, generateID, nil, nil, testCampaignChainID)
+	_, err := missingPublisher.Create(t.Context(), input)
+	if err == nil || !strings.Contains(err.Error(), "publisher is required") || !strings.Contains(err.Error(), campaignID.String()) {
+		t.Fatalf("Create() error = %v, want missing publisher", err)
+	}
+
+	missingChain := NewCampaignService(&campaignRepositoryStub{created: stored}, generateID, nil, publisher, 0)
+	_, err = missingChain.Create(t.Context(), input)
+	if err == nil || !strings.Contains(err.Error(), "chain ID is required") {
+		t.Fatalf("Create() error = %v, want missing chain ID", err)
+	}
+	if len(publisher.tasks) != 0 {
+		t.Fatalf("deployment publishes = %d, want 0", len(publisher.tasks))
 	}
 }
