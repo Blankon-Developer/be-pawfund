@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This Go backend starts at `cmd/api/main.go`. Application code lives under `internal/`: `http/handler` contains HTTP handlers and DTOs, `http/routes` maps Chi routes, `http/middleware` and `http/httpx` cover shared HTTP helpers, `service` implements business rules, `repository` holds persistence contracts, `infra/database` implements PostgreSQL adapters, and `domain` defines core types. Supporting packages cover auth, configuration, and infrastructure adapters under `infra/` (`cache`, `queue`, `storage`). Timestamped Goose migrations live in `migrations/`. Unit tests sit beside their packages; broader tests live in `internal/integration/`.
+This Go backend starts at `cmd/api/main.go`. The campaign deployer worker starts at `cmd/deployer/main.go`. Application code lives under `internal/`: `http/handler` contains HTTP handlers and DTOs, `http/routes` maps Chi routes, `http/middleware` and `http/httpx` cover shared HTTP helpers, `service` implements business rules, `repository` holds persistence contracts, `infra/database` implements PostgreSQL adapters, and `domain` defines core types. Supporting packages cover auth, configuration, and infrastructure adapters under `infra/` (`cache`, `queue`, `storage`). Timestamped Goose migrations live in `migrations/`. Unit tests sit beside their packages; broader tests live in `internal/integration/`.
 
 Keep dependencies flowing from transport to service to repository/domain. Wire new components in `internal/app/app.go` and register endpoints in `internal/http/routes/routes.go`.
 
@@ -11,6 +11,7 @@ Keep dependencies flowing from transport to service to repository/domain. Wire n
 - `docker compose up -d postgres minio redis` starts local dependencies.
 - `go run github.com/pressly/goose/v3/cmd/goose@v3.27.3 -dir migrations postgres "$DATABASE_URL" up` applies migrations.
 - `go run ./cmd/api` starts the API using environment variables from `.env`.
+- `go run ./cmd/deployer` starts the campaign deployment consumer (`DATABASE_URL`, `QUEUE_URL`, `SIWE_CHAIN_ID`; optional `DEPLOYER_HTTP_ADDR`, default `:8081`).
 - `make test` runs all non-integration Go tests.
 - `make test-integration` starts isolated PostgreSQL/Redis services and runs `integration`-tagged tests.
 - `make test-all` runs both suites; `make test-db-down` removes test services.
