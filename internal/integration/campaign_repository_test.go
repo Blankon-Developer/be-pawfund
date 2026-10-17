@@ -469,3 +469,79 @@ func newPendingCampaign(endAt time.Time, idempotencyKey string) domain.Campaign 
 		IdempotencyKey:   idempotencyKey,
 	}
 }
+
+func TestPostgresCampaignRepositoryCompleteDeployment(t *testing.T) {
+	const walletAddress = "0xFundraiserChecksum"
+	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
+	campaignRepo := database.NewPostgresCampaignRepository(testDatabase)
+
+	t.Run("activates a pending campaign", func(t *testing.T) {
+		cleanDatabase(t)
+		t.Cleanup(func() { cleanDatabase(t) })
+		fundraiser := newFundraiser("rescue@example.com", walletAddress, nil)
+		mustCreateFundraiser(t, fundraiserRepo, fundraiser)
+
+		endAt := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
+		created, err := campaignRepo.CreatePending(
+			t.Context(),
+			walletAddress,
+			newPendingCampaign(endAt, "deploy-1"),
+			time.Now().UTC().Add(5*time.Minute),
+		)
+		if err != nil {
+			t.Fatalf("CreatePending() unexpected error: %v", err)
+		}
+
+		eventID := uuid.New()
+		contractAddress := "0xCampaignDeployed"
+		eventCreatedAt := time.Now().UTC().Truncate(time.Second)
+		if err := campaignRepo.CompleteDeployment(t.Context(), created.ID, domain.BlockchainEvent{
+			ID:          eventID,
+			TxHash:      "0xDeployTx",
+			LogIndex:    0,
+			Type:        domain.BlockchainEventTypeCampaignCreated,
+			BlockNumber: 42,
+			CreatedAt:   eventCreatedAt,
+		}, contractAddress); err != nil {
+			t.Fatalf("CompleteDeployment() unexpected error: %v", err)
+		}
+
+		found, err := campaignRepo.FindByIDForDeployment(t.Context(), created.ID)
+		if err != nil {
+			t.Fatalf("FindByIDForDeployment() unexpected error: %v", err)
+		}
+		if found.Status != domain.CampaignStatusActive || found.EventID == nil || *found.EventID != eventID {
+			t.Fatalf("deployed campaign = %#v", found)
+		}
+		if found.ContractAddress == nil || *found.ContractAddress != contractAddress {
+			t.Fatalf("contract address = %#v", found.ContractAddress)
+		}
+
+		if err := campaignRepo.CompleteDeployment(t.Context(), created.ID, domain.BlockchainEvent{
+			ID:          uuid.New(),
+			TxHash:      "0xReplay",
+			LogIndex:    1,
+			Type:        domain.BlockchainEventTypeCampaignCreated,
+			BlockNumber: 43,
+			CreatedAt:   eventCreatedAt,
+		}, "0xOther"); err != nil {
+			t.Fatalf("CompleteDeployment() replay error = %v", err)
+		}
+	})
+
+	t.Run("rejects missing and non-pending campaigns", func(t *testing.T) {
+		cleanDatabase(t)
+		t.Cleanup(func() { cleanDatabase(t) })
+		_, err := campaignRepo.CompleteDeployment(t.Context(), uuid.New(), domain.BlockchainEvent{
+			ID:          uuid.New(),
+			TxHash:      "0xDeployTx",
+			LogIndex:    0,
+			Type:        domain.BlockchainEventTypeCampaignCreated,
+			BlockNumber: 1,
+			CreatedAt:   time.Now().UTC(),
+		}, "0xCampaign")
+		if !errors.Is(err, repository.ErrCampaignNotFound) {
+			t.Fatalf("missing campaign error = %v", err)
+		}
+	})
+}

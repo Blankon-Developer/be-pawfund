@@ -414,6 +414,133 @@ func (r *PostgresCampaignRepository) FindByIDForFundraiser(
 	return campaign, nil
 }
 
+func (r *PostgresCampaignRepository) FindByIDForDeployment(
+	ctx context.Context,
+	campaignID uuid.UUID,
+) (domain.Campaign, error) {
+	const query = `
+		SELECT
+			id,
+			fundraiser_id,
+			event_id,
+			title,
+			short_description,
+			story,
+			goal_amount,
+			raised_amount,
+			donor_count,
+			contract_address,
+			created_at,
+			end_at,
+			image_object_key,
+			country,
+			zip_code,
+			status,
+			idempotency_key
+		FROM campaigns
+		WHERE id = $1
+	`
+
+	campaign, err := scanCampaign(r.db.QueryRowContext(ctx, query, campaignID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Campaign{}, repository.ErrCampaignNotFound
+	}
+	if err != nil {
+		return domain.Campaign{}, fmt.Errorf("repository: find campaign for deployment: %w", err)
+	}
+	return campaign, nil
+}
+
+func (r *PostgresCampaignRepository) CompleteDeployment(
+	ctx context.Context,
+	campaignID uuid.UUID,
+	event domain.BlockchainEvent,
+	contractAddress string,
+) error {
+	contractAddress = strings.TrimSpace(contractAddress)
+	if contractAddress == "" {
+		return fmt.Errorf("repository: complete campaign deployment: contract address is required")
+	}
+	if event.ID == uuid.Nil {
+		return fmt.Errorf("repository: complete campaign deployment: event id is required")
+	}
+	if strings.TrimSpace(event.TxHash) == "" {
+		return fmt.Errorf("repository: complete campaign deployment: tx hash is required")
+	}
+	if event.Type != domain.BlockchainEventTypeCampaignCreated {
+		return fmt.Errorf("repository: complete campaign deployment: unsupported event type %q", event.Type)
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("repository: begin complete campaign deployment transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const lockCampaign = `
+		SELECT status, contract_address
+		FROM campaigns
+		WHERE id = $1
+		FOR UPDATE
+	`
+	var status domain.CampaignStatus
+	var existingAddress sql.NullString
+	if err := tx.QueryRowContext(ctx, lockCampaign, campaignID).Scan(&status, &existingAddress); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return repository.ErrCampaignNotFound
+		}
+		return fmt.Errorf("repository: lock campaign for deployment: %w", err)
+	}
+
+	if status == domain.CampaignStatusActive {
+		if existingAddress.Valid && strings.TrimSpace(existingAddress.String) != "" {
+			return nil
+		}
+		return repository.ErrCampaignNotPendingDeployment
+	}
+	if status != domain.CampaignStatusPending {
+		return repository.ErrCampaignNotPendingDeployment
+	}
+
+	const insertEvent = `
+		INSERT INTO blockchain_events (id, tx_hash, log_index, type, block_number, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	if _, err := tx.ExecContext(
+		ctx,
+		insertEvent,
+		event.ID,
+		strings.TrimSpace(event.TxHash),
+		event.LogIndex,
+		string(event.Type),
+		event.BlockNumber,
+		event.CreatedAt.UTC(),
+	); err != nil {
+		return fmt.Errorf("repository: insert campaign deployment event: %w", err)
+	}
+
+	const updateCampaign = `
+		UPDATE campaigns
+		SET status = $2, event_id = $3, contract_address = $4
+		WHERE id = $1
+	`
+	if _, err := tx.ExecContext(
+		ctx,
+		updateCampaign,
+		campaignID,
+		domain.CampaignStatusActive,
+		event.ID,
+		contractAddress,
+	); err != nil {
+		return fmt.Errorf("repository: update campaign deployment: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("repository: commit complete campaign deployment: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresCampaignRepository) CreatePending(
 	ctx context.Context,
 	walletAddress string,

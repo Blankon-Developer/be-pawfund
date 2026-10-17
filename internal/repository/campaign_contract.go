@@ -10,10 +10,11 @@ import (
 )
 
 var (
-	ErrCampaignFundraiserNotFound  = errors.New("campaign fundraiser not found")
-	ErrCampaignIdempotencyConflict = errors.New("campaign idempotency key reused with different payload")
-	ErrCampaignEndAtTooSoon        = errors.New("campaign end time is too soon")
-	ErrCampaignNotFound            = errors.New("campaign not found")
+	ErrCampaignFundraiserNotFound   = errors.New("campaign fundraiser not found")
+	ErrCampaignIdempotencyConflict  = errors.New("campaign idempotency key reused with different payload")
+	ErrCampaignEndAtTooSoon         = errors.New("campaign end time is too soon")
+	ErrCampaignNotFound             = errors.New("campaign not found")
+	ErrCampaignNotPendingDeployment = errors.New("campaign is not pending deployment")
 )
 
 type CampaignRepository interface {
@@ -40,4 +41,11 @@ type CampaignRepository interface {
 		campaign domain.Campaign,
 		minimumEndAt time.Time,
 	) (domain.Campaign, error)
+	FindByIDForDeployment(ctx context.Context, campaignID uuid.UUID) (domain.Campaign, error)
+	CompleteDeployment(
+		ctx context.Context,
+		campaignID uuid.UUID,
+		event domain.BlockchainEvent,
+		contractAddress string,
+	) error
 }
