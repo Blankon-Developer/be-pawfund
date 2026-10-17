@@ -48,4 +48,12 @@ func TestCampaignDeploymentBody(t *testing.T) {
 	if message.CampaignID != campaignID.String() || message.FundraiserID != fundraiserID.String() || message.FundraiserWallet != "0xFundraiserChecksum" || message.GoalAmount != 10_000_000_000 || message.EndAt != "2026-10-25T04:00:00Z" || message.ChainID != 84532 {
 		t.Fatalf("message = %#v", message)
 	}
+
+	decoded, err := DecodeCampaignDeploymentMessage(body)
+	if err != nil {
+		t.Fatalf("DecodeCampaignDeploymentMessage() error = %v", err)
+	}
+	if decoded.CampaignID != campaignID || decoded.FundraiserID != fundraiserID || decoded.FundraiserWallet != "0xFundraiserChecksum" || decoded.GoalAmount != 10_000_000_000 || !decoded.EndAt.Equal(endAt.UTC()) || decoded.ChainID != 84532 {
+		t.Fatalf("decoded = %#v", decoded)
+	}
 }
