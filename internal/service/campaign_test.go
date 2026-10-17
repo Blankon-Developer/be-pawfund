@@ -145,6 +145,22 @@ func (s *campaignRepositoryStub) CreatePending(
 	return campaign, nil
 }
 
+func (s *campaignRepositoryStub) FindByIDForDeployment(
+	_ context.Context,
+	_ uuid.UUID,
+) (domain.Campaign, error) {
+	return domain.Campaign{}, errors.New("campaign repository stub: FindByIDForDeployment is not configured")
+}
+
+func (s *campaignRepositoryStub) CompleteDeployment(
+	_ context.Context,
+	_ uuid.UUID,
+	_ domain.BlockchainEvent,
+	_ string,
+) error {
+	return errors.New("campaign repository stub: CompleteDeployment is not configured")
+}
+
 func TestCampaignServiceCreate(t *testing.T) {
 	fixedNow := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
 	fixedID := uuid.MustParse("0198a123-4567-7abc-8123-456789abcdef")

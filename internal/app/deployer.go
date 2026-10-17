@@ -10,9 +10,11 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/config"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
+	"github.com/Blankon-Developer/be-pawfund/internal/infra/blockchain"
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/database"
 	"github.com/Blankon-Developer/be-pawfund/internal/infra/queue"
 	"github.com/Blankon-Developer/be-pawfund/internal/service"
+	"github.com/google/uuid"
 )
 
 // Deployer runs the campaign deployment queue consumer.
@@ -67,12 +69,20 @@ func NewDeployer(ctx context.Context, cfg config.DeployerConfig, logger *slog.Lo
 		return fail(fmt.Errorf("app: deployer consumer: %w", err))
 	}
 
+	campaignRepository := database.NewPostgresCampaignRepository(db)
+
 	return &Deployer{
 		DB:       db,
 		Queue:    queueClient,
 		consumer: consumer,
-		worker:   service.NewCampaignDeploymentWorker(cfg.ChainID, logger),
-		logger:   logger,
+		worker: service.NewCampaignDeploymentWorker(
+			cfg.ChainID,
+			campaignRepository,
+			blockchain.NewStubCampaignDeployer(),
+			uuid.NewV7,
+			logger,
+		),
+		logger: logger,
 	}, nil
 }
 
