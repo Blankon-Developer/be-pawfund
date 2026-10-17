@@ -565,11 +565,12 @@ func newFundraiserProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JW
 		t.Fatalf("create object deleter: %v", err)
 	}
 	fundraiserService := service.NewFundraiserService(fundraiserRepository, uuid.NewV7, objectDeleter, newIntegrationObjectPromoter(t))
+	authService := service.NewAuthService(nil, nil, jwtManager, service.AuthConfig{AccessTokenTTL: time.Hour})
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
-		SupporterHandler:  handler.NewSupporterHandler(nil, urlBuilder, logger),
-		FundraiserHandler: handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger),
+		SupporterHandler:  handler.NewSupporterHandler(nil, authService, urlBuilder, logger),
+		FundraiserHandler: handler.NewFundraiserHandler(fundraiserService, authService, urlBuilder, logger),
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

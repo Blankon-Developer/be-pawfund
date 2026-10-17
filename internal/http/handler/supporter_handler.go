@@ -28,21 +28,28 @@ type SupporterService interface {
 	DeleteProfile(ctx context.Context, walletAddress string) error
 }
 
+type AccessTokenIssuer interface {
+	IssueAccessToken(walletAddress string, role domain.UserRole) (string, error)
+}
+
 type SupporterHandler struct {
-	service    SupporterService
-	urlBuilder *storage.PublicURLBuilder
+	service      SupporterService
+	tokenIssuer  AccessTokenIssuer
+	urlBuilder   *storage.PublicURLBuilder
 	httpx.Responder
 }
 
 func NewSupporterHandler(
 	service SupporterService,
+	tokenIssuer AccessTokenIssuer,
 	urlBuilder *storage.PublicURLBuilder,
 	logger *slog.Logger,
 ) *SupporterHandler {
 	return &SupporterHandler{
-		service:    service,
-		urlBuilder: urlBuilder,
-		Responder:  httpx.NewResponder(logger),
+		service:     service,
+		tokenIssuer: tokenIssuer,
+		urlBuilder:  urlBuilder,
+		Responder:   httpx.NewResponder(logger),
 	}
 }
 
@@ -82,12 +89,20 @@ func (h *SupporterHandler) HandleRegisterSupporter(w http.ResponseWriter, r *htt
 		return
 	}
 
+	accessToken, err := h.tokenIssuer.IssueAccessToken(created.WalletAddress, created.Role)
+	if err != nil {
+		h.Logger.Error("issue access token after supporter registration", "error", err)
+		h.InternalError(w)
+		return
+	}
+
 	response := registerSupporterResponse{
 		Name:          created.Name,
 		Email:         created.Email,
 		WalletAddress: created.WalletAddress,
 		ImageURL:      h.urlBuilder.Build(created.ImageObjectKey),
 		Role:          created.Role,
+		AccessToken:   accessToken,
 	}
 	h.Success(w, http.StatusCreated, "SUPPORTER_REGISTERED", "Supporter account created successfully.", response)
 }

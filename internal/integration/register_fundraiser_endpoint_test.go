@@ -37,11 +37,12 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 	}
 	fundraiserRepo := database.NewPostgresFundraiserRepository(testDatabase)
 	fundraiserService := service.NewFundraiserService(fundraiserRepo, uuid.NewV7, nil, newIntegrationObjectPromoter(t))
-	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, urlBuilder, logger)
+	authService := service.NewAuthService(nil, nil, jwtManager, service.AuthConfig{AccessTokenTTL: 24 * time.Hour})
+	fundraiserHandler := handler.NewFundraiserHandler(fundraiserService, authService, urlBuilder, logger)
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
-		SupporterHandler:  handler.NewSupporterHandler(nil, urlBuilder, logger),
+		SupporterHandler:  handler.NewSupporterHandler(nil, authService, urlBuilder, logger),
 		FundraiserHandler: fundraiserHandler,
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}
@@ -190,12 +191,26 @@ func TestRegisterFundraiserEndpoint(t *testing.T) {
 					WalletAddress string          `json:"walletAddress"`
 					ImageURL      *string         `json:"imageUrl"`
 					Role          domain.UserRole `json:"role"`
+					AccessToken   string          `json:"accessToken"`
 				}
 				if err := json.Unmarshal(decoded.Data, &data); err != nil {
 					t.Fatalf("decode response data: %v", err)
 				}
 				if data.WalletAddress != test.walletAddress || data.Role != domain.UserRoleFundraiser {
 					t.Errorf("response identity = %q/%q", data.WalletAddress, data.Role)
+				}
+				if data.AccessToken == "" {
+					t.Fatal("expected accessToken in registration response")
+				}
+				principal, err := jwtManager.Verify(data.AccessToken)
+				if err != nil {
+					t.Fatalf("verify registration access token: %v", err)
+				}
+				if principal.WalletAddress != test.walletAddress {
+					t.Errorf("token wallet = %q, want %q", principal.WalletAddress, test.walletAddress)
+				}
+				if principal.Role != domain.UserRoleFundraiser {
+					t.Errorf("token role = %q, want %q", principal.Role, domain.UserRoleFundraiser)
 				}
 				wantImageURL := "https://cdn.example.com/pawfund/" + canonicalImageKey
 				if data.ImageURL == nil || *data.ImageURL != wantImageURL {

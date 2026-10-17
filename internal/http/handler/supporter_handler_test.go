@@ -88,6 +88,27 @@ func (s *stubSupporterRegistrar) GetProfile(
 	return s.profile, nil
 }
 
+type stubAccessTokenIssuer struct {
+	token   string
+	err     error
+	calls   int
+	address string
+	role    domain.UserRole
+}
+
+func (s *stubAccessTokenIssuer) IssueAccessToken(
+	walletAddress string,
+	role domain.UserRole,
+) (string, error) {
+	s.calls++
+	s.address = walletAddress
+	s.role = role
+	if s.token == "" {
+		s.token = "registration-access-token"
+	}
+	return s.token, s.err
+}
+
 func (s *stubSupporterRegistrar) ListMyDonations(
 	_ context.Context,
 	walletAddress string,
@@ -240,12 +261,13 @@ func TestHandleRegisterSupporter(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			registrar := &stubSupporterRegistrar{err: test.serviceError}
+			tokenIssuer := &stubAccessTokenIssuer{}
 			urlBuilder, err := storage.NewPublicURLBuilder("https://cdn.example.com/pawfund")
 			if err != nil {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			handler := NewSupporterHandler(registrar, urlBuilder, logger)
+			handler := NewSupporterHandler(registrar, tokenIssuer, urlBuilder, logger)
 
 			request := httptest.NewRequest(http.MethodPost, "/v1/register/supporter", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", test.contentType)
@@ -290,12 +312,24 @@ func TestHandleRegisterSupporter(t *testing.T) {
 				if err := json.Unmarshal(decoded.Data, &data); err != nil {
 					t.Fatalf("decode success data: %v", err)
 				}
+				if data.AccessToken != tokenIssuer.token {
+					t.Errorf("access token = %q, want %q", data.AccessToken, tokenIssuer.token)
+				}
+				if tokenIssuer.calls != 1 || tokenIssuer.address != test.walletAddress {
+					t.Errorf("token issuer = calls:%d address:%q", tokenIssuer.calls, tokenIssuer.address)
+				}
+				if tokenIssuer.role != domain.UserRoleSupporter {
+					t.Errorf("token issuer role = %q", tokenIssuer.role)
+				}
 				if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 					t.Errorf("image URL = %v, want %v", pointerValue(data.ImageURL), pointerValue(test.wantImageURL))
 				}
 				if strings.Contains(string(decoded.Data), "wallet_address") || !strings.Contains(string(decoded.Data), "walletAddress") {
 					t.Errorf("response does not use camelCase: %s", decoded.Data)
 				}
+			}
+			if test.wantCall && test.wantHTTP != http.StatusCreated && tokenIssuer.calls != 0 {
+				t.Errorf("token issuer calls = %d, want 0", tokenIssuer.calls)
 			}
 		})
 	}
@@ -388,7 +422,7 @@ func TestHandleGetSupporterProfile(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			handler := NewSupporterHandler(serviceStub, urlBuilder, logger)
+			handler := NewSupporterHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, logger)
 			request := httptest.NewRequest(http.MethodGet, "/v1/supporter/profile", nil)
 			if test.principal != nil {
 				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
@@ -509,7 +543,7 @@ func TestSupporterHandlerHandleReplaceProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create public URL builder: %v", err)
 			}
-			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := NewSupporterHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			request := httptest.NewRequest(http.MethodPut, "/v1/supporter/profile", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")
 			if test.wallet != "" {
@@ -569,7 +603,7 @@ func TestSupporterHandlerHandleDeleteProfile(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			serviceStub := &stubSupporterRegistrar{deleteErr: test.serviceError}
-			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := NewSupporterHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			request := httptest.NewRequest(http.MethodDelete, "/v1/supporter/profile", nil)
 			if test.walletAddress != "" {
 				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), auth.Principal{WalletAddress: test.walletAddress}))
@@ -695,7 +729,7 @@ func TestSupporterHandlerHandleGetMyDonations(t *testing.T) {
 				donations:        test.donations,
 				listDonationsErr: test.serviceError,
 			}
-			handler := NewSupporterHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := NewSupporterHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			request := httptest.NewRequest(http.MethodGet, "/v1/supporter/donations"+test.query, nil)
 			if test.principal != nil {
 				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))

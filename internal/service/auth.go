@@ -175,6 +175,21 @@ func (s *AuthService) Verify(
 	return result, nil
 }
 
+func (s *AuthService) IssueAccessToken(
+	walletAddress string,
+	role domain.UserRole,
+) (string, error) {
+	accessToken, err := s.tokenGenerator.Generate(
+		walletAddress,
+		role,
+		s.config.AccessTokenTTL,
+	)
+	if err != nil {
+		return "", fmt.Errorf("service: generate access token: %w", err)
+	}
+	return accessToken, nil
+}
+
 func (s *AuthService) GetMe(ctx context.Context, walletAddress string) (domain.AuthProfile, error) {
 	profile, exists, err := s.repository.FindProfileByWalletAddress(
 		ctx,

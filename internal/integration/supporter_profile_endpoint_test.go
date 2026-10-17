@@ -363,11 +363,12 @@ func newSupporterProfileIntegrationRouter(t *testing.T) (http.Handler, *auth.JWT
 		t.Fatalf("create object deleter: %v", err)
 	}
 	supporterService := service.NewSupporterService(supporterRepository, uuid.NewV7, objectDeleter, newIntegrationObjectPromoter(t))
+	authService := service.NewAuthService(nil, nil, jwtManager, service.AuthConfig{AccessTokenTTL: time.Hour})
 	application := &app.Application{
 		DB:                testDatabase,
 		AuthHandler:       handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
-		SupporterHandler:  handler.NewSupporterHandler(supporterService, urlBuilder, logger),
-		FundraiserHandler: handler.NewFundraiserHandler(nil, urlBuilder, logger),
+		SupporterHandler:  handler.NewSupporterHandler(supporterService, authService, urlBuilder, logger),
+		FundraiserHandler: handler.NewFundraiserHandler(nil, authService, urlBuilder, logger),
 		Authenticate:      appmiddleware.Authenticate(jwtManager, logger),
 	}
 	return routes.Setup(application, logger), jwtManager

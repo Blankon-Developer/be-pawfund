@@ -235,7 +235,8 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			handler := NewFundraiserHandler(registrar, urlBuilder, logger)
+			tokenIssuer := &stubAccessTokenIssuer{}
+			handler := NewFundraiserHandler(registrar, tokenIssuer, urlBuilder, logger)
 
 			request := httptest.NewRequest(http.MethodPost, "/v1/register/fundraiser", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", test.contentType)
@@ -280,6 +281,15 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 				if err := json.Unmarshal(decoded.Data, &data); err != nil {
 					t.Fatalf("decode success data: %v", err)
 				}
+				if data.AccessToken != tokenIssuer.token {
+					t.Errorf("access token = %q, want %q", data.AccessToken, tokenIssuer.token)
+				}
+				if tokenIssuer.calls != 1 || tokenIssuer.address != test.walletAddress {
+					t.Errorf("token issuer = calls:%d address:%q", tokenIssuer.calls, tokenIssuer.address)
+				}
+				if tokenIssuer.role != domain.UserRoleFundraiser {
+					t.Errorf("token issuer role = %q", tokenIssuer.role)
+				}
 				if data.WalletAddress != test.walletAddress || data.Role != domain.UserRoleFundraiser {
 					t.Errorf("response identity = %q/%q", data.WalletAddress, data.Role)
 				}
@@ -292,6 +302,9 @@ func TestHandleRegisterFundraiser(t *testing.T) {
 				if strings.Contains(string(decoded.Data), "address") || !strings.Contains(string(decoded.Data), "walletAddress") {
 					t.Errorf("response wallet field is incorrect: %s", decoded.Data)
 				}
+			}
+			if test.wantCall && test.wantHTTP != http.StatusCreated && tokenIssuer.calls != 0 {
+				t.Errorf("token issuer calls = %d, want 0", tokenIssuer.calls)
 			}
 		})
 	}
@@ -371,7 +384,7 @@ func TestFundraiserHandlerHandleReplaceProfile(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create public URL builder: %v", err)
 			}
-			handler := NewFundraiserHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := NewFundraiserHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			request := httptest.NewRequest(http.MethodPut, "/v1/fundraiser/profile", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")
 			if test.walletAddress != "" {
@@ -432,7 +445,7 @@ func TestFundraiserHandlerHandleDeleteProfile(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			serviceStub := &stubFundraiserRegistrar{deleteErr: test.serviceError}
-			handler := NewFundraiserHandler(serviceStub, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			handler := NewFundraiserHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			request := httptest.NewRequest(http.MethodDelete, "/v1/fundraiser/profile", nil)
 			if test.walletAddress != "" {
 				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), auth.Principal{WalletAddress: test.walletAddress}))
@@ -567,7 +580,7 @@ func TestFundraiserHandlerHandleGetProfile(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			handler := NewFundraiserHandler(serviceStub, urlBuilder, logger)
+			handler := NewFundraiserHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, logger)
 			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/profile", nil)
 			if test.principal != nil {
 				request = request.WithContext(auth.ContextWithPrincipal(request.Context(), *test.principal))
@@ -716,7 +729,7 @@ func TestFundraiserHandlerHandleGetPublicProfile(t *testing.T) {
 				t.Fatalf("create public URL builder: %v", err)
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			handler := NewFundraiserHandler(serviceStub, urlBuilder, logger)
+			handler := NewFundraiserHandler(serviceStub, &stubAccessTokenIssuer{}, urlBuilder, logger)
 			request := httptest.NewRequest(http.MethodGet, "/v1/fundraiser/test", nil)
 			routeContext := chi.NewRouteContext()
 			routeContext.URLParams.Add("address", test.address)

@@ -90,6 +90,10 @@
                           "type": "string",
                           "enum": ["FUNDRAISER"],
                           "default": "FUNDRAISER"
+                        },
+                        "accessToken": {
+                          "type": "string",
+                          "description": "Bearer access token with the fundraiser role."
                         }
                       },
                       "required": [
@@ -101,7 +105,8 @@
                         "zipCode",
                         "imageUrl",
                         "walletAddress",
-                        "role"
+                        "role",
+                        "accessToken"
                       ]
                     },
                     "errors": { "type": "object", "nullable": true }
@@ -1625,9 +1630,13 @@
                           "type": "string",
                           "enum": ["SUPPORTER"],
                           "default": "SUPPORTER"
+                        },
+                        "accessToken": {
+                          "type": "string",
+                          "description": "Bearer access token with the supporter role."
                         }
                       },
-                      "required": ["walletAddress", "email", "name", "imageUrl", "role"]
+                      "required": ["walletAddress", "email", "name", "imageUrl", "role", "accessToken"]
                     },
                     "errors": { "type": "object", "nullable": true }
                   },

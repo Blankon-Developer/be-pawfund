@@ -29,20 +29,23 @@ type FundraiserService interface {
 }
 
 type FundraiserHandler struct {
-	service    FundraiserService
-	urlBuilder *storage.PublicURLBuilder
+	service     FundraiserService
+	tokenIssuer AccessTokenIssuer
+	urlBuilder  *storage.PublicURLBuilder
 	httpx.Responder
 }
 
 func NewFundraiserHandler(
 	service FundraiserService,
+	tokenIssuer AccessTokenIssuer,
 	urlBuilder *storage.PublicURLBuilder,
 	logger *slog.Logger,
 ) *FundraiserHandler {
 	return &FundraiserHandler{
-		service:    service,
-		urlBuilder: urlBuilder,
-		Responder:  httpx.NewResponder(logger),
+		service:     service,
+		tokenIssuer: tokenIssuer,
+		urlBuilder:  urlBuilder,
+		Responder:   httpx.NewResponder(logger),
 	}
 }
 
@@ -89,6 +92,13 @@ func (h *FundraiserHandler) HandleRegisterFundraiser(w http.ResponseWriter, r *h
 		return
 	}
 
+	accessToken, err := h.tokenIssuer.IssueAccessToken(created.WalletAddress, created.Role)
+	if err != nil {
+		h.Logger.Error("issue access token after fundraiser registration", "error", err)
+		h.InternalError(w)
+		return
+	}
+
 	response := registerFundraiserResponse{
 		Name:  created.Name,
 		Email: created.Email,
@@ -102,6 +112,7 @@ func (h *FundraiserHandler) HandleRegisterFundraiser(w http.ResponseWriter, r *h
 		ImageURL:      h.urlBuilder.Build(created.ImageObjectKey),
 		WalletAddress: created.WalletAddress,
 		Role:          created.Role,
+		AccessToken:   accessToken,
 	}
 	h.Success(w, http.StatusCreated, "FUNDRAISER_REGISTERED", "Fundraiser account created successfully.", response)
 }

@@ -327,6 +327,31 @@ func TestAuthServiceVerify(t *testing.T) {
 	}
 }
 
+func TestAuthServiceIssueAccessToken(t *testing.T) {
+	tokenGenerator := &authTokenGeneratorStub{token: "issued-token"}
+	service := newTestAuthService(&authStoreStub{values: make(map[string][]byte)}, &authProfileRepositoryStub{}, tokenGenerator)
+
+	token, err := service.IssueAccessToken("0xWallet", domain.UserRoleFundraiser)
+	if err != nil {
+		t.Fatalf("IssueAccessToken: %v", err)
+	}
+	if token != "issued-token" {
+		t.Errorf("token = %q, want %q", token, "issued-token")
+	}
+	if tokenGenerator.address != "0xWallet" || tokenGenerator.role != domain.UserRoleFundraiser {
+		t.Errorf("generator args = %q/%q", tokenGenerator.address, tokenGenerator.role)
+	}
+	if tokenGenerator.ttl != testAuthConfig().AccessTokenTTL {
+		t.Errorf("ttl = %v, want %v", tokenGenerator.ttl, testAuthConfig().AccessTokenTTL)
+	}
+
+	tokenGenerator.err = errors.New("sign failed")
+	_, err = service.IssueAccessToken("0xWallet", domain.UserRoleSupporter)
+	if err == nil {
+		t.Fatal("expected error when token generation fails")
+	}
+}
+
 func TestAuthServiceGetMe(t *testing.T) {
 	imageKey := "profiles/cat.png"
 	profile := domain.AuthProfile{

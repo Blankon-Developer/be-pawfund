@@ -81,6 +81,7 @@ type registerSupporterResponse struct {
 	WalletAddress string          `json:"walletAddress"`
 	ImageURL      *string         `json:"imageUrl"`
 	Role          domain.UserRole `json:"role"`
+	AccessToken   string          `json:"accessToken"`
 }
 
 type mySupporterProfileResponse struct {

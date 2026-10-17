@@ -14,6 +14,7 @@ import (
 
 	"github.com/Blankon-Developer/be-pawfund/internal/app"
 	"github.com/Blankon-Developer/be-pawfund/internal/auth"
+	"github.com/Blankon-Developer/be-pawfund/internal/domain"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/handler"
 	"github.com/Blankon-Developer/be-pawfund/internal/http/httpx"
 	appmiddleware "github.com/Blankon-Developer/be-pawfund/internal/http/middleware"
@@ -37,7 +38,8 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 	}
 	repo := database.NewPostgresSupporterRepository(testDatabase)
 	supporterService := service.NewSupporterService(repo, uuid.NewV7, nil, newIntegrationObjectPromoter(t))
-	supporterHandler := handler.NewSupporterHandler(supporterService, urlBuilder, logger)
+	authService := service.NewAuthService(nil, nil, jwtManager, service.AuthConfig{AccessTokenTTL: 24 * time.Hour})
+	supporterHandler := handler.NewSupporterHandler(supporterService, authService, urlBuilder, logger)
 	application := &app.Application{
 		DB:               testDatabase,
 		AuthHandler:      handler.NewAuthHandler(nil, urlBuilder, 84532, logger),
@@ -200,12 +202,26 @@ func TestRegisterSupporterEndpoint(t *testing.T) {
 				var data struct {
 					WalletAddress string  `json:"walletAddress"`
 					ImageURL      *string `json:"imageUrl"`
+					AccessToken   string  `json:"accessToken"`
 				}
 				if err := json.Unmarshal(decoded.Data, &data); err != nil {
 					t.Fatalf("decode response data: %v", err)
 				}
 				if data.WalletAddress != test.walletAddress {
 					t.Errorf("response wallet = %q, want %q", data.WalletAddress, test.walletAddress)
+				}
+				if data.AccessToken == "" {
+					t.Fatal("expected accessToken in registration response")
+				}
+				principal, err := jwtManager.Verify(data.AccessToken)
+				if err != nil {
+					t.Fatalf("verify registration access token: %v", err)
+				}
+				if principal.WalletAddress != test.walletAddress {
+					t.Errorf("token wallet = %q, want %q", principal.WalletAddress, test.walletAddress)
+				}
+				if principal.Role != domain.UserRoleSupporter {
+					t.Errorf("token role = %q, want %q", principal.Role, domain.UserRoleSupporter)
 				}
 				if !equalStringPointers(data.ImageURL, test.wantImageURL) {
 					t.Errorf("response image URL = %v, want %v", data.ImageURL, test.wantImageURL)
