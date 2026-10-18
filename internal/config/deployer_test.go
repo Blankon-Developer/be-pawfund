@@ -60,6 +60,32 @@ func TestLoadDeployer(t *testing.T) {
 			}),
 			wantError: "SIWE_CHAIN_ID must be a positive integer",
 		},
+		{
+			name: "defaults deployment mode to stub",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"DEPLOYMENT_MODE": "",
+			}),
+			wantHTTP:    defaultDeployerHTTPAddr,
+			wantChainID: 84532,
+		},
+		{
+			name: "requires live chain settings",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"DEPLOYMENT_MODE": "live",
+			}),
+			wantError: "CHAIN_RPC_URL is required when DEPLOYMENT_MODE=live",
+		},
+		{
+			name: "accepts live deployment settings",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"DEPLOYMENT_MODE":          "live",
+				"CHAIN_RPC_URL":            "https://sepolia.base.org",
+				"CAMPAIGN_FACTORY_ADDRESS": "0x0000000000000000000000000000000000000001",
+				"DEPLOYER_PRIVATE_KEY":     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			}),
+			wantHTTP:    defaultDeployerHTTPAddr,
+			wantChainID: 84532,
+		},
 	}
 
 	for _, tt := range tests {
@@ -78,6 +104,12 @@ func TestLoadDeployer(t *testing.T) {
 			}
 			if cfg.HTTPAddr != tt.wantHTTP || cfg.ChainID != tt.wantChainID {
 				t.Fatalf("config = %#v, want HTTP %q chainID %d", cfg, tt.wantHTTP, tt.wantChainID)
+			}
+			if tt.name == "defaults deployment mode to stub" && cfg.DeploymentMode != "stub" {
+				t.Fatalf("DeploymentMode = %q, want stub", cfg.DeploymentMode)
+			}
+			if tt.name == "accepts live deployment settings" && cfg.DeploymentMode != "live" {
+				t.Fatalf("DeploymentMode = %q, want live", cfg.DeploymentMode)
 			}
 		})
 	}

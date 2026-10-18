@@ -19,11 +19,12 @@ import (
 
 // Deployer runs the campaign deployment queue consumer.
 type Deployer struct {
-	DB       *sql.DB
-	Queue    *queue.QueueClient
-	consumer *queue.Consumer
-	worker   *service.CampaignDeploymentWorker
-	logger   *slog.Logger
+	DB              *sql.DB
+	Queue           *queue.QueueClient
+	consumer        *queue.Consumer
+	worker          *service.CampaignDeploymentWorker
+	closeChain      func() error
+	logger          *slog.Logger
 }
 
 func NewDeployer(ctx context.Context, cfg config.DeployerConfig, logger *slog.Logger) (*Deployer, error) {
@@ -71,6 +72,24 @@ func NewDeployer(ctx context.Context, cfg config.DeployerConfig, logger *slog.Lo
 
 	campaignRepository := database.NewPostgresCampaignRepository(db)
 
+	chainDeployer, err := blockchain.NewConfiguredCampaignDeployer(
+		ctx,
+		cfg.DeploymentMode,
+		cfg.ChainID,
+		cfg.ChainRPCURL,
+		cfg.CampaignFactoryAddress,
+		cfg.DeployerPrivateKey,
+		cfg.ConfirmTimeout,
+	)
+	if err != nil {
+		return fail(fmt.Errorf("app: deployer campaign deployer: %w", err))
+	}
+
+	logger.Info(
+		"deployer chain adapter configured",
+		"deploymentMode", cfg.DeploymentMode,
+	)
+
 	return &Deployer{
 		DB:       db,
 		Queue:    queueClient,
@@ -78,11 +97,12 @@ func NewDeployer(ctx context.Context, cfg config.DeployerConfig, logger *slog.Lo
 		worker: service.NewCampaignDeploymentWorker(
 			cfg.ChainID,
 			campaignRepository,
-			blockchain.NewStubCampaignDeployer(),
+			chainDeployer.Deployer,
 			uuid.NewV7,
 			logger,
 		),
-		logger: logger,
+		closeChain: chainDeployer.Close,
+		logger:     logger,
 	}, nil
 }
 
@@ -143,6 +163,11 @@ func (d *Deployer) handleDelivery(ctx context.Context, delivery queue.Delivery) 
 
 func (d *Deployer) Close() error {
 	var closeErrors []error
+	if d.closeChain != nil {
+		if err := d.closeChain(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("app: close chain deployer: %w", err))
+		}
+	}
 	if d.Queue != nil {
 		if err := d.Queue.Close(); err != nil {
 			closeErrors = append(closeErrors, fmt.Errorf("app: close queue: %w", err))
