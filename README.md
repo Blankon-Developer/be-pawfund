@@ -32,6 +32,11 @@ QUEUE_URL=amqp://pawfund:pawfund@localhost:5672/
 SIWE_DOMAIN=localhost:3000
 SIWE_URI=http://localhost:3000/login
 SIWE_CHAIN_ID=84532
+DEPLOYMENT_MODE=stub
+CHAIN_RPC_URL=https://sepolia.base.org
+CAMPAIGN_FACTORY_ADDRESS=0x64bD5192cB735CB25C082Db33730691E428fb9AB
+DEPLOYER_PRIVATE_KEY=
+DEPLOYMENT_CONFIRM_TIMEOUT=2m
 SIWE_MESSAGE_TTL=5m
 JWT_TTL=24h
 CORS_ALLOWED_ORIGINS=http://localhost:3000
@@ -56,7 +61,10 @@ go run ./cmd/deployer
 ```
 
 Run the deployer when you want pending campaigns to be processed from the
-queue. The worker currently uses a stub on-chain deployer for local development.
+queue. By default `DEPLOYMENT_MODE=stub` simulates factory deployment for
+local development. Set `DEPLOYMENT_MODE=live` with RPC, factory address, and a
+deployer private key to call the Pawfund factory `createCampaign(bytes16,address,uint256,uint256)`
+on Base Sepolia (see `.env.example` for the default testnet factory address).
 
 ### Deployer configuration
 
@@ -69,6 +77,11 @@ does not require API-only secrets (JWT, storage, SIWE domain, and so on).
 | `QUEUE_URL` | yes | RabbitMQ AMQP URL (matches Compose `rabbitmq` defaults) |
 | `SIWE_CHAIN_ID` | yes | Must match the API so queued tasks pass chain validation |
 | `DEPLOYER_HTTP_ADDR` | no | Defaults to `:8081` |
+| `DEPLOYMENT_MODE` | no | `stub` (default) or `live` |
+| `CHAIN_RPC_URL` | live only | EVM JSON-RPC endpoint for the target chain |
+| `CAMPAIGN_FACTORY_ADDRESS` | live only | Deployed Pawfund campaign factory |
+| `DEPLOYER_PRIVATE_KEY` | live only | Hot wallet that sends factory transactions (never commit) |
+| `DEPLOYMENT_CONFIRM_TIMEOUT` | no | Defaults to `2m` while waiting for receipts |
 
 Health check: `GET http://localhost:8081/health` (or the host and port from
 `DEPLOYER_HTTP_ADDR`). Campaign deployment messages use exchange `pawfund.tasks`

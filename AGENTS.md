@@ -11,7 +11,7 @@ Keep dependencies flowing from transport to service to repository/domain. Wire n
 - `docker compose up -d postgres minio redis` starts local dependencies.
 - `go run github.com/pressly/goose/v3/cmd/goose@v3.27.3 -dir migrations postgres "$DATABASE_URL" up` applies migrations.
 - `go run ./cmd/api` starts the API using environment variables from `.env`.
-- `go run ./cmd/deployer` starts the campaign deployment consumer (`DATABASE_URL`, `QUEUE_URL`, `SIWE_CHAIN_ID`; optional `DEPLOYER_HTTP_ADDR`, default `:8081`).
+- `go run ./cmd/deployer` starts the campaign deployment consumer (`DATABASE_URL`, `QUEUE_URL`, `SIWE_CHAIN_ID`; optional `DEPLOYER_HTTP_ADDR`, default `:8081`). Use `DEPLOYMENT_MODE=live` with `CHAIN_RPC_URL`, `CAMPAIGN_FACTORY_ADDRESS`, and `DEPLOYER_PRIVATE_KEY` for on-chain factory deploys; default `stub` keeps local development offline.
 - `make test` runs all non-integration Go tests.
 - `make test-integration` starts isolated PostgreSQL/Redis services and runs `integration`-tagged tests.
 - `make test-all` runs both suites; `make test-db-down` removes test services.
