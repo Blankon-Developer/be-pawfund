@@ -16,12 +16,13 @@ import (
 const maxPresignTTL = 7 * 24 * time.Hour
 
 type PresignerConfig struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Region    string
-	TTL       time.Duration
+	Endpoint       string
+	PublicEndpoint string
+	AccessKey      string
+	SecretKey      string
+	Bucket         string
+	Region         string
+	TTL            time.Duration
 }
 
 type headerPresigner interface {
@@ -37,15 +38,23 @@ type headerPresigner interface {
 }
 
 type PutPresigner struct {
-	client headerPresigner
-	bucket string
-	ttl    time.Duration
+	client         headerPresigner
+	bucket         string
+	ttl            time.Duration
+	publicEndpoint *url.URL
 }
 
 func NewPutPresigner(cfg PresignerConfig) (*PutPresigner, error) {
 	parsedEndpoint, err := parseEndpoint(cfg.Endpoint)
 	if err != nil {
 		return nil, err
+	}
+	var publicEndpoint *url.URL
+	if strings.TrimSpace(cfg.PublicEndpoint) != "" {
+		publicEndpoint, err = parseEndpoint(cfg.PublicEndpoint)
+		if err != nil {
+			return nil, fmt.Errorf("storage: presign public endpoint: %w", err)
+		}
 	}
 	if strings.TrimSpace(cfg.AccessKey) == "" {
 		return nil, fmt.Errorf("storage: access key is required")
@@ -74,7 +83,12 @@ func NewPutPresigner(cfg PresignerConfig) (*PutPresigner, error) {
 		return nil, fmt.Errorf("storage: initialize MinIO client: %w", err)
 	}
 
-	return &PutPresigner{client: client, bucket: bucket, ttl: cfg.TTL}, nil
+	return &PutPresigner{
+		client:         client,
+		bucket:         bucket,
+		ttl:            cfg.TTL,
+		publicEndpoint: publicEndpoint,
+	}, nil
 }
 
 func (p *PutPresigner) PresignPut(
@@ -98,6 +112,10 @@ func (p *PutPresigner) PresignPut(
 	)
 	if err != nil {
 		return "", fmt.Errorf("storage: presign PUT: %w", err)
+	}
+	if p.publicEndpoint != nil {
+		presignedURL.Scheme = p.publicEndpoint.Scheme
+		presignedURL.Host = p.publicEndpoint.Host
 	}
 	return presignedURL.String(), nil
 }

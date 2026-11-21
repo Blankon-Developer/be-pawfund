@@ -10,8 +10,11 @@ API documentation is maintained in [docs/pawfund-api.json](docs/pawfund-api.json
 ## Local configuration
 
 Copy `.env.example` to `.env` and replace `JWT_SECRET` with at least 32 random
-bytes. `STORAGE_ENDPOINT` must be an HTTP(S) origin reachable by the frontend,
-while the storage public base URL must already include the public bucket name.
+bytes. `STORAGE_ENDPOINT` is the origin MinIO itself accepts, including the host
+used in the signature. `STORAGE_PRESIGN_PUBLIC_ENDPOINT` is optional and replaces
+only the scheme and host of presigned URLs so a browser can reach storage through
+a forwarded address. Leave it empty when the browser can call `STORAGE_ENDPOINT`
+directly. The storage public base URL must already include the public bucket name.
 Integration test variables (`TEST_*`) are documented in `.env.example`.
 
 ```dotenv
@@ -21,6 +24,7 @@ DATABASE_URL=postgres://pawfund:pawfund@localhost:5432/pawfund?sslmode=disable
 JWT_SECRET=replace-this-with-at-least-32-random-bytes
 STORAGE_PUBLIC_BASE_URL=http://localhost:9000/pawfund
 STORAGE_ENDPOINT=http://localhost:9000
+STORAGE_PRESIGN_PUBLIC_ENDPOINT=
 STORAGE_ACCESS_KEY=minioadmin
 STORAGE_SECRET_KEY=minioadmin
 STORAGE_BUCKET=pawfund

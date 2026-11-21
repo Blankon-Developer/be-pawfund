@@ -69,12 +69,13 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 		return fail(fmt.Errorf("app: initialize public URL builder: %w", err))
 	}
 	putPresigner, err := storage.NewPutPresigner(storage.PresignerConfig{
-		Endpoint:  cfg.StorageEndpoint,
-		AccessKey: cfg.StorageAccessKey,
-		SecretKey: cfg.StorageSecretKey,
-		Bucket:    cfg.StorageBucket,
-		Region:    cfg.StorageRegion,
-		TTL:       cfg.StoragePresignTTL,
+		Endpoint:       cfg.StorageEndpoint,
+		PublicEndpoint: cfg.StoragePresignPublicEndpoint,
+		AccessKey:      cfg.StorageAccessKey,
+		SecretKey:      cfg.StorageSecretKey,
+		Bucket:         cfg.StorageBucket,
+		Region:         cfg.StorageRegion,
+		TTL:            cfg.StoragePresignTTL,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("app: initialize storage presigner: %w", err))

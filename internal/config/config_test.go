@@ -101,6 +101,13 @@ func TestLoad(t *testing.T) {
 			wantError: "STORAGE_ENDPOINT must be an HTTP(S) origin",
 		},
 		{
+			name: "rejects presign public endpoint with a path",
+			environment: mergeEnvironment(validEnvironment, map[string]string{
+				"STORAGE_PRESIGN_PUBLIC_ENDPOINT": "https://storage.example.com/minio",
+			}),
+			wantError: "STORAGE_PRESIGN_PUBLIC_ENDPOINT must be an HTTP(S) origin",
+		},
+		{
 			name: "requires storage access key",
 			environment: mergeEnvironment(validEnvironment, map[string]string{
 				"STORAGE_ACCESS_KEY": "",

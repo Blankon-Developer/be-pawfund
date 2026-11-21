@@ -58,6 +58,7 @@ func TestNewPutPresigner(t *testing.T) {
 		{name: "accepts valid configuration"},
 		{name: "rejects relative endpoint", mutate: func(cfg *PresignerConfig) { cfg.Endpoint = "localhost:9000" }, wantError: "absolute HTTP(S) URL"},
 		{name: "rejects endpoint path", mutate: func(cfg *PresignerConfig) { cfg.Endpoint = "https://storage.example.com/minio" }, wantError: "must not contain"},
+		{name: "rejects public endpoint path", mutate: func(cfg *PresignerConfig) { cfg.PublicEndpoint = "https://storage.example.com/minio" }, wantError: "presign public endpoint"},
 		{name: "requires access key", mutate: func(cfg *PresignerConfig) { cfg.AccessKey = " " }, wantError: "access key is required"},
 		{name: "requires secret key", mutate: func(cfg *PresignerConfig) { cfg.SecretKey = " " }, wantError: "secret key is required"},
 		{name: "requires bucket", mutate: func(cfg *PresignerConfig) { cfg.Bucket = " " }, wantError: "bucket is required"},
@@ -139,6 +140,39 @@ func TestPutPresignerPresignPutSignedHeaders(t *testing.T) {
 	}
 	if got := parsed.Query().Get("X-Amz-Expires"); got != "900" {
 		t.Errorf("X-Amz-Expires = %q", got)
+	}
+}
+
+func TestPutPresignerRewritesPublicEndpoint(t *testing.T) {
+	presigner, err := NewPutPresigner(PresignerConfig{
+		Endpoint:       "http://localhost:9000",
+		PublicEndpoint: "https://storage.example.com",
+		AccessKey:      "access-key",
+		SecretKey:      "secret-key",
+		Bucket:         "pawfund",
+		Region:         "us-east-1",
+		TTL:            15 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("NewPutPresigner(): %v", err)
+	}
+
+	rawURL, err := presigner.PresignPut(t.Context(), "tmp/campaigns/id.jpg", "image/jpeg", 4)
+	if err != nil {
+		t.Fatalf("PresignPut(): %v", err)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse presigned URL: %v", err)
+	}
+	if parsed.Scheme != "https" || parsed.Host != "storage.example.com" {
+		t.Errorf("public target = %s://%s", parsed.Scheme, parsed.Host)
+	}
+	if parsed.Path != "/pawfund/tmp/campaigns/id.jpg" {
+		t.Errorf("presigned path = %q", parsed.Path)
+	}
+	if got := parsed.Query().Get("X-Amz-SignedHeaders"); got != "content-length;content-type;host" {
+		t.Errorf("X-Amz-SignedHeaders = %q", got)
 	}
 }
 

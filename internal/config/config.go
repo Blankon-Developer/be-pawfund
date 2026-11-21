@@ -18,25 +18,26 @@ const (
 )
 
 type Config struct {
-	HTTPAddr             string
-	DatabaseURL          string
-	JWTSecret            []byte
-	StoragePublicBaseURL string
-	StorageEndpoint      string
-	StorageAccessKey     string
-	StorageSecretKey     string
-	StorageBucket        string
-	StorageRegion        string
-	StoragePresignTTL    time.Duration
-	CacheURL             string
-	CacheKeyPrefix       string
-	QueueURL             string
-	SIWEDomain           string
-	SIWEURI              string
-	SIWEChainID          int
-	SIWEMessageTTL       time.Duration
-	JWTTTL               time.Duration
-	CORSAllowedOrigins   []string
+	HTTPAddr                     string
+	DatabaseURL                  string
+	JWTSecret                    []byte
+	StoragePublicBaseURL         string
+	StorageEndpoint              string
+	StoragePresignPublicEndpoint string
+	StorageAccessKey             string
+	StorageSecretKey             string
+	StorageBucket                string
+	StorageRegion                string
+	StoragePresignTTL            time.Duration
+	CacheURL                     string
+	CacheKeyPrefix               string
+	QueueURL                     string
+	SIWEDomain                   string
+	SIWEURI                      string
+	SIWEChainID                  int
+	SIWEMessageTTL               time.Duration
+	JWTTTL                       time.Duration
+	CORSAllowedOrigins           []string
 }
 
 func Load() (Config, error) {
@@ -45,20 +46,21 @@ func Load() (Config, error) {
 
 func load(getenv func(string) string) (Config, error) {
 	cfg := Config{
-		HTTPAddr:             strings.TrimSpace(getenv("HTTP_ADDR")),
-		DatabaseURL:          strings.TrimSpace(getenv("DATABASE_URL")),
-		JWTSecret:            []byte(getenv("JWT_SECRET")),
-		StoragePublicBaseURL: strings.TrimSpace(getenv("STORAGE_PUBLIC_BASE_URL")),
-		StorageEndpoint:      strings.TrimSpace(getenv("STORAGE_ENDPOINT")),
-		StorageAccessKey:     strings.TrimSpace(getenv("STORAGE_ACCESS_KEY")),
-		StorageSecretKey:     strings.TrimSpace(getenv("STORAGE_SECRET_KEY")),
-		StorageBucket:        strings.TrimSpace(getenv("STORAGE_BUCKET")),
-		StorageRegion:        strings.TrimSpace(getenv("STORAGE_REGION")),
-		CacheURL:             strings.TrimSpace(getenv("CACHE_URL")),
-		CacheKeyPrefix:       strings.TrimSpace(getenv("CACHE_KEY_PREFIX")),
-		QueueURL:             strings.TrimSpace(getenv("QUEUE_URL")),
-		SIWEDomain:           strings.TrimSpace(getenv("SIWE_DOMAIN")),
-		SIWEURI:              strings.TrimSpace(getenv("SIWE_URI")),
+		HTTPAddr:                     strings.TrimSpace(getenv("HTTP_ADDR")),
+		DatabaseURL:                  strings.TrimSpace(getenv("DATABASE_URL")),
+		JWTSecret:                    []byte(getenv("JWT_SECRET")),
+		StoragePublicBaseURL:         strings.TrimSpace(getenv("STORAGE_PUBLIC_BASE_URL")),
+		StorageEndpoint:              strings.TrimSpace(getenv("STORAGE_ENDPOINT")),
+		StoragePresignPublicEndpoint: strings.TrimSpace(getenv("STORAGE_PRESIGN_PUBLIC_ENDPOINT")),
+		StorageAccessKey:             strings.TrimSpace(getenv("STORAGE_ACCESS_KEY")),
+		StorageSecretKey:             strings.TrimSpace(getenv("STORAGE_SECRET_KEY")),
+		StorageBucket:                strings.TrimSpace(getenv("STORAGE_BUCKET")),
+		StorageRegion:                strings.TrimSpace(getenv("STORAGE_REGION")),
+		CacheURL:                     strings.TrimSpace(getenv("CACHE_URL")),
+		CacheKeyPrefix:               strings.TrimSpace(getenv("CACHE_KEY_PREFIX")),
+		QueueURL:                     strings.TrimSpace(getenv("QUEUE_URL")),
+		SIWEDomain:                   strings.TrimSpace(getenv("SIWE_DOMAIN")),
+		SIWEURI:                      strings.TrimSpace(getenv("SIWE_URI")),
 	}
 
 	if cfg.HTTPAddr == "" {
@@ -76,8 +78,13 @@ func load(getenv func(string) string) (Config, error) {
 	if cfg.StorageEndpoint == "" {
 		return Config{}, fmt.Errorf("config: STORAGE_ENDPOINT is required")
 	}
-	if err := validateStorageEndpoint(cfg.StorageEndpoint); err != nil {
+	if err := validateStorageEndpoint("STORAGE_ENDPOINT", cfg.StorageEndpoint); err != nil {
 		return Config{}, err
+	}
+	if cfg.StoragePresignPublicEndpoint != "" {
+		if err := validateStorageEndpoint("STORAGE_PRESIGN_PUBLIC_ENDPOINT", cfg.StoragePresignPublicEndpoint); err != nil {
+			return Config{}, err
+		}
 	}
 	if cfg.StorageAccessKey == "" {
 		return Config{}, fmt.Errorf("config: STORAGE_ACCESS_KEY is required")
@@ -190,13 +197,13 @@ func normalizeHTTPOrigin(raw string) (string, error) {
 	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
-func validateStorageEndpoint(rawEndpoint string) error {
+func validateStorageEndpoint(name, rawEndpoint string) error {
 	parsed, err := url.Parse(rawEndpoint)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fmt.Errorf("config: STORAGE_ENDPOINT must be an absolute HTTP(S) URL")
+		return fmt.Errorf("config: %s must be an absolute HTTP(S) URL", name)
 	}
 	if parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("config: STORAGE_ENDPOINT must be an HTTP(S) origin without credentials, path, query, or fragment")
+		return fmt.Errorf("config: %s must be an HTTP(S) origin without credentials, path, query, or fragment", name)
 	}
 	return nil
 }
