@@ -32,3 +32,9 @@ Recent history follows Conventional Commits: `feat(auth): ...`, `fix(routes): ..
 ## Security & Configuration
 
 Copy `.env.example` to `.env`, never commit secrets, and use a random `JWT_SECRET` of at least 32 bytes. Keep SIWE domain, URI, and chain ID aligned with the frontend environment. Treat migrations as append-only once shared.
+
+## Cursor Cloud specific instructions
+
+Cloud Agent boot starts Docker with the `fuse-overlayfs` storage driver, then `postgres`, `minio`, `redis`, and `rabbitmq` from `compose.yml`. When `.env` is missing it is copied from `.env.example`. Boot also creates the `pawfund` MinIO bucket and applies Goose migrations. `cmd/api` listens on `:8080` and `cmd/deployer` on `:8081`, in tmux sessions `pawfund-api` and `pawfund-deployer`. Logs are `/tmp/pawfund-api.log` and `/tmp/pawfund-deployer.log`. Docker commands need `sudo`.
+
+`make test` does not need those services. `make test-integration` starts the Compose `test` profile on Postgres `5433`, Redis `6380`, MinIO `9002`, and RabbitMQ `5673`. `goose` and `golangci-lint` are on `PATH`.
